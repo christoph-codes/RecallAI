@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RecallAI",
-  description: "AI Memory for everyone",
+  title: "Recall AI",
+  description: "Remember the things that matter most.",
 };
 
 export default function RootLayout({
