@@ -1,21 +1,22 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace RecallAI.Api.Models;
 
 public class MemoryCollection
 {
-    [Key]
-    public Guid Id { get; set; }
-    
     [Required]
     public Guid MemoryId { get; set; }
     
     [Required]
     public Guid CollectionId { get; set; }
     
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset AddedAt { get; set; }
     
     // Navigation properties
+    [ForeignKey("MemoryId")]
     public virtual Memory Memory { get; set; } = null!;
+    
+    [ForeignKey("CollectionId")]
     public virtual Collection Collection { get; set; } = null!;
 }
