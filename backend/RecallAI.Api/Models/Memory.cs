@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace RecallAI.Api.Models;
 
@@ -7,27 +8,24 @@ public class Memory
     [Key]
     public Guid Id { get; set; }
     
-    [Required]
-    public Guid ProfileId { get; set; }
+    public Guid? UserId { get; set; }
     
-    [Required]
-    [MaxLength(500)]
-    public string Title { get; set; } = string.Empty;
+    public string? Title { get; set; }
     
     [Required]
     public string Content { get; set; } = string.Empty;
     
-    [MaxLength(50)]
-    public string? Type { get; set; }
+    public string ContentType { get; set; } = "text";
     
-    [MaxLength(1000)]
-    public string? Metadata { get; set; }
+    [Column(TypeName = "jsonb")]
+    public Dictionary<string, object>? Metadata { get; set; }
     
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
     
     // Navigation properties
-    public virtual Profile Profile { get; set; } = null!;
-    public virtual MemoryEmbedding? Embedding { get; set; }
-    public virtual ICollection<MemoryCollection> MemoryCollections { get; set; } = new List<MemoryCollection>();
+    [ForeignKey("UserId")]
+    public virtual Profile? Profile { get; set; }
+    public virtual ICollection<MemoryEmbedding> MemoryEmbeddings { get; set; } = new List<MemoryEmbedding>();
+    public virtual ICollection<Collection> Collections { get; set; } = new List<Collection>();
 }
