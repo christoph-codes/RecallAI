@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using RecallAI.Api.Data;
+using RecallAI.Api.Interfaces;
+using RecallAI.Api.Repositories;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,13 +15,8 @@ builder.Services.AddControllers();
 // Database Context with Npgsql and pgvector
 var envConnectionString = Environment.GetEnvironmentVariable("SUPABASE_CONNECTION_STRING");
 var configConnectionString = builder.Configuration.GetConnectionString("DefaultConnection");
-
-Console.WriteLine($"Environment connection string: '{envConnectionString}'");
-Console.WriteLine($"Config connection string: '{configConnectionString}'");
-
 var connectionString = envConnectionString ?? configConnectionString;
 
-Console.WriteLine($"Final connection string: '{connectionString}'");
 
 if (string.IsNullOrEmpty(connectionString))
 {
@@ -48,6 +45,9 @@ builder.Services.AddDbContext<MemoryDbContext>(options =>
         options.EnableDetailedErrors();
     }
 });
+
+// Register repositories
+builder.Services.AddScoped<IMemoryRepository, MemoryRepository>();
 
 // JWT Authentication for Supabase tokens
 var jwtSecret = Environment.GetEnvironmentVariable("SUPABASE_JWT_SECRET")
