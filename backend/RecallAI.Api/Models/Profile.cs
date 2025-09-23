@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace RecallAI.Api.Models;
 
@@ -7,18 +8,17 @@ public class Profile
     [Key]
     public Guid Id { get; set; }
     
-    [Required]
-    [MaxLength(255)]
-    public string Email { get; set; } = string.Empty;
+    public string? Email { get; set; }
     
-    [MaxLength(100)]
-    public string? FirstName { get; set; }
+    public string? FullName { get; set; }
     
-    [MaxLength(100)]
-    public string? LastName { get; set; }
+    public string? AvatarUrl { get; set; }
     
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    [Column(TypeName = "jsonb")]
+    public Dictionary<string, object>? Preferences { get; set; }
+    
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
     
     // Navigation properties
     public virtual ICollection<Memory> Memories { get; set; } = new List<Memory>();

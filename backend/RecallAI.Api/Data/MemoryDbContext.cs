@@ -16,6 +16,15 @@ public class MemoryDbContext : DbContext
     public DbSet<Collection> Collections { get; set; }
     public DbSet<MemoryCollection> MemoryCollections { get; set; }
 
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        if (!optionsBuilder.IsConfigured)
+        {
+            // This will only be used if DbContext is created without DI
+            // The main configuration is in Program.cs
+        }
+    }
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -26,80 +35,90 @@ public class MemoryDbContext : DbContext
         // Profile configuration
         modelBuilder.Entity<Profile>(entity =>
         {
+            entity.ToTable("profiles");
             entity.HasKey(e => e.Id);
-            entity.HasIndex(e => e.Email).IsUnique();
-            entity.Property(e => e.Email).IsRequired().HasMaxLength(255);
-            entity.Property(e => e.FirstName).HasMaxLength(100);
-            entity.Property(e => e.LastName).HasMaxLength(100);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Email).HasColumnName("email");
+            entity.Property(e => e.FullName).HasColumnName("full_name");
+            entity.Property(e => e.AvatarUrl).HasColumnName("avatar_url");
+            entity.Property(e => e.Preferences).HasColumnName("preferences").HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
         });
 
         // Memory configuration
         modelBuilder.Entity<Memory>(entity =>
         {
+            entity.ToTable("memories");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Title).IsRequired().HasMaxLength(500);
-            entity.Property(e => e.Content).IsRequired();
-            entity.Property(e => e.Type).HasMaxLength(50);
-            entity.Property(e => e.Metadata).HasMaxLength(1000);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Title).HasColumnName("title");
+            entity.Property(e => e.Content).HasColumnName("content").IsRequired();
+            entity.Property(e => e.ContentType).HasColumnName("content_type").HasDefaultValue("text");
+            entity.Property(e => e.Metadata).HasColumnName("metadata").HasColumnType("jsonb").HasDefaultValueSql("'{}'::jsonb");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
 
             entity.HasOne(e => e.Profile)
                   .WithMany(p => p.Memories)
-                  .HasForeignKey(e => e.ProfileId)
-                  .OnDelete(DeleteBehavior.Cascade);
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.SetNull);
+
+            // Configure many-to-many relationship with Collections
+            entity.HasMany(e => e.Collections)
+                  .WithMany(c => c.Memories)
+                  .UsingEntity<MemoryCollection>(
+                      j => j.HasOne(mc => mc.Collection)
+                            .WithMany()
+                            .HasForeignKey(mc => mc.CollectionId),
+                      j => j.HasOne(mc => mc.Memory)
+                            .WithMany()
+                            .HasForeignKey(mc => mc.MemoryId),
+                      j =>
+                      {
+                          j.ToTable("memory_collections");
+                          j.HasKey(mc => new { mc.MemoryId, mc.CollectionId });
+                          j.Property(mc => mc.MemoryId).HasColumnName("memory_id");
+                          j.Property(mc => mc.CollectionId).HasColumnName("collection_id");
+                          j.Property(mc => mc.AddedAt).HasColumnName("added_at").HasDefaultValueSql("now()");
+                      });
         });
 
         // MemoryEmbedding configuration
         modelBuilder.Entity<MemoryEmbedding>(entity =>
         {
+            entity.ToTable("memory_embeddings");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Embedding).HasColumnType("vector(1536)"); // OpenAI text-embedding-3-small dimension
-            entity.Property(e => e.Model).HasMaxLength(50).HasDefaultValue("text-embedding-3-small");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.MemoryId).HasColumnName("memory_id");
+            entity.Property(e => e.Embedding).HasColumnName("embedding").HasColumnType("vector(1536)");
+            entity.Property(e => e.ModelName).HasColumnName("model_name").HasDefaultValue("text-embedding-3-small");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
 
             entity.HasOne(e => e.Memory)
-                  .WithOne(m => m.Embedding)
-                  .HasForeignKey<MemoryEmbedding>(e => e.MemoryId)
-                  .OnDelete(DeleteBehavior.Cascade);
+                  .WithMany(m => m.MemoryEmbeddings)
+                  .HasForeignKey(e => e.MemoryId)
+                  .OnDelete(DeleteBehavior.SetNull);
         });
 
         // Collection configuration
         modelBuilder.Entity<Collection>(entity =>
         {
+            entity.ToTable("collections");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Name).IsRequired().HasMaxLength(200);
-            entity.Property(e => e.Description).HasMaxLength(1000);
-            entity.Property(e => e.Color).HasMaxLength(50).HasDefaultValue("#3B82F6");
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-            entity.Property(e => e.UpdatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.UserId).HasColumnName("user_id");
+            entity.Property(e => e.Name).HasColumnName("name").IsRequired();
+            entity.Property(e => e.Description).HasColumnName("description");
+            entity.Property(e => e.Color).HasColumnName("color").HasDefaultValue("#6366f1");
+            entity.Property(e => e.CreatedAt).HasColumnName("created_at").HasDefaultValueSql("now()");
+            entity.Property(e => e.UpdatedAt).HasColumnName("updated_at").HasDefaultValueSql("now()");
 
             entity.HasOne(e => e.Profile)
                   .WithMany(p => p.Collections)
-                  .HasForeignKey(e => e.ProfileId)
-                  .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        // MemoryCollection configuration (many-to-many)
-        modelBuilder.Entity<MemoryCollection>(entity =>
-        {
-            entity.HasKey(e => e.Id);
-            entity.Property(e => e.CreatedAt).HasDefaultValueSql("CURRENT_TIMESTAMP");
-
-            entity.HasOne(e => e.Memory)
-                  .WithMany(m => m.MemoryCollections)
-                  .HasForeignKey(e => e.MemoryId)
-                  .OnDelete(DeleteBehavior.Cascade);
-
-            entity.HasOne(e => e.Collection)
-                  .WithMany(c => c.MemoryCollections)
-                  .HasForeignKey(e => e.CollectionId)
-                  .OnDelete(DeleteBehavior.Cascade);
-
-            // Ensure unique memory-collection pairs
-            entity.HasIndex(e => new { e.MemoryId, e.CollectionId }).IsUnique();
+                  .HasForeignKey(e => e.UserId)
+                  .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }

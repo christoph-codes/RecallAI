@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 using Pgvector;
 
 namespace RecallAI.Api.Models;
@@ -8,17 +9,15 @@ public class MemoryEmbedding
     [Key]
     public Guid Id { get; set; }
     
-    [Required]
-    public Guid MemoryId { get; set; }
+    public Guid? MemoryId { get; set; }
     
-    [Required]
-    public Vector Embedding { get; set; } = null!;
+    public Vector? Embedding { get; set; }
     
-    [MaxLength(50)]
-    public string Model { get; set; } = "text-embedding-3-small";
+    public string ModelName { get; set; } = "text-embedding-3-small";
     
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedAt { get; set; }
     
     // Navigation properties
-    public virtual Memory Memory { get; set; } = null!;
+    [ForeignKey("MemoryId")]
+    public virtual Memory? Memory { get; set; }
 }
