@@ -28,7 +28,25 @@ if (string.IsNullOrEmpty(connectionString))
 
 builder.Services.AddDbContext<MemoryDbContext>(options =>
 {
-    options.UseNpgsql(connectionString, o => o.UseVector());
+    options.UseNpgsql(connectionString, npgsqlOptions =>
+    {
+        npgsqlOptions.UseVector();
+        npgsqlOptions.CommandTimeout(120); // Increase timeout to 2 minutes
+        npgsqlOptions.EnableRetryOnFailure(
+            maxRetryCount: 3,
+            maxRetryDelay: TimeSpan.FromSeconds(30),
+            errorCodesToAdd: null);
+    });
+    
+    // Configure query behavior
+    options.UseQueryTrackingBehavior(QueryTrackingBehavior.NoTracking);
+    
+    // Enable sensitive data logging in development
+    if (builder.Environment.IsDevelopment())
+    {
+        options.EnableSensitiveDataLogging();
+        options.EnableDetailedErrors();
+    }
 });
 
 // JWT Authentication for Supabase tokens

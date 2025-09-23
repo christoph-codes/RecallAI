@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations.Schema;
 
 namespace RecallAI.Api.Models;
 
@@ -7,23 +8,20 @@ public class Collection
     [Key]
     public Guid Id { get; set; }
     
-    [Required]
-    public Guid ProfileId { get; set; }
+    public Guid? UserId { get; set; }
     
     [Required]
-    [MaxLength(200)]
     public string Name { get; set; } = string.Empty;
     
-    [MaxLength(1000)]
     public string? Description { get; set; }
     
-    [MaxLength(50)]
-    public string Color { get; set; } = "#3B82F6";
+    public string Color { get; set; } = "#6366f1";
     
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTimeOffset CreatedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
     
     // Navigation properties
-    public virtual Profile Profile { get; set; } = null!;
-    public virtual ICollection<MemoryCollection> MemoryCollections { get; set; } = new List<MemoryCollection>();
+    [ForeignKey("UserId")]
+    public virtual Profile? Profile { get; set; }
+    public virtual ICollection<Memory> Memories { get; set; } = new List<Memory>();
 }
