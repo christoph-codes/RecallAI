@@ -8,13 +8,14 @@ import { useState } from "react";
 
 const Create = () => {
   const router = useRouter();
-  //   const [fullName, setFullName] = useState("");
+  const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
   const handleSignUp = async () => {
     if (password !== confirmPassword) {
-      console.error("Passwords do not match");
+      setError("Passwords do not match");
       return;
     }
     const { data, error } = await supabase.auth.signUp({
@@ -22,7 +23,7 @@ const Create = () => {
       password,
     });
     if (error) {
-      console.error("Sign up failed:", error);
+      setError(error.message);
     } else {
       console.log("Sign up successful:", data);
       router.push("/dashboard");
@@ -39,15 +40,18 @@ const Create = () => {
         priority
       />
       <p className="max-w-prose text-balance text-xl font-bold text-white/90 text-center">
-        Sign up today!
+        Create your Recalll account
+      </p>
+      <p className="max-w-prose  text-base text-white/90 text-center">
+        Remember the things that matter most.
       </p>
       <div className="flex flex-col gap-4 w-full items-stretch">
-        {/* <Input
+        <Input
           label="Full Name"
           placeholder="John Doe"
           value={fullName}
           onChange={(e) => setFullName(e.target.value)}
-        /> */}
+        />
         <Input
           label="Email"
           placeholder="john@doe.com"
@@ -68,6 +72,7 @@ const Create = () => {
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
         />
+        {error && <p className="text-black text-sm font-bold">{error}</p>}
         <Button onClick={handleSignUp}>Sign up</Button>
         <Button variant="ghost" onClick={() => router.push("/auth/login")}>
           Already have an account?
