@@ -50,25 +50,67 @@ builder.Services.AddDbContext<MemoryDbContext>(options =>
 });
 
 // JWT Authentication for Supabase tokens
-var jwtSecret = Environment.GetEnvironmentVariable("SUPABASE_JWT_SECRET") 
+var jwtSecret = Environment.GetEnvironmentVariable("SUPABASE_JWT_SECRET")
     ?? builder.Configuration["Supabase:JwtSecret"];
 
-if (!string.IsNullOrEmpty(jwtSecret))
+if (string.IsNullOrEmpty(jwtSecret))
 {
-    builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-        .AddJwtBearer(options =>
-        {
-            options.TokenValidationParameters = new TokenValidationParameters
-            {
-                ValidateIssuerSigningKey = true,
-                IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
-                ValidateIssuer = false,
-                ValidateAudience = false,
-                ValidateLifetime = true,
-                ClockSkew = TimeSpan.Zero
-            };
-        });
+    throw new InvalidOperationException("JWT secret is not configured. Please set SUPABASE_JWT_SECRET environment variable or Supabase:JwtSecret in appsettings.json");
 }
+
+// Decode base64 JWT secret if needed
+byte[] key;
+try
+{
+    key = Convert.FromBase64String(jwtSecret);
+}
+catch
+{
+    // If it's not base64, treat as plain text
+    key = Encoding.UTF8.GetBytes(jwtSecret);
+}
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(key),
+            ValidateIssuer = false, // Supabase doesn't always set issuer consistently
+            ValidateAudience = false, // Supabase doesn't always set audience consistently
+            ValidateLifetime = true,
+            ClockSkew = TimeSpan.Zero,
+            RequireExpirationTime = true
+        };
+
+        // Configure JWT events for better error handling
+        options.Events = new JwtBearerEvents
+        {
+            OnAuthenticationFailed = context =>
+            {
+                if (context.Exception.GetType() == typeof(SecurityTokenExpiredException))
+                {
+                    context.Response.Headers["Token-Expired"] = "true";
+                }
+                return Task.CompletedTask;
+            },
+            OnChallenge = context =>
+            {
+                context.HandleResponse();
+                context.Response.StatusCode = 401;
+                context.Response.ContentType = "application/json";
+                var result = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    error = "Authorization required",
+                    message = "A valid JWT token is required to access this resource",
+                    statusCode = 401,
+                    timestamp = DateTime.UtcNow
+                });
+                return context.Response.WriteAsync(result);
+            }
+        };
+    });
 
 builder.Services.AddAuthorization();
 
@@ -142,6 +184,9 @@ if (app.Environment.IsDevelopment())
 app.UseHttpsRedirection();
 
 app.UseCors();
+
+// Add custom JWT validation middleware before authentication
+app.UseMiddleware<RecallAI.Api.Middleware.JwtValidationMiddleware>();
 
 app.UseAuthentication();
 app.UseAuthorization();
