@@ -112,7 +112,7 @@ const Create = () => {
         </Button>
         <Button
           variant="ghost"
-          onClick={() => !isCreatingAccount && router.push("/auth/login")}
+          onClick={() => !isCreatingAccount && router.push("/")}
         >
           Already have an account?
         </Button>
