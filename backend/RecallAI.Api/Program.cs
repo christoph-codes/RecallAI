@@ -52,6 +52,10 @@ builder.Services.AddDbContext<MemoryDbContext>(options =>
 builder.Services.Configure<OpenAIConfiguration>(
     builder.Configuration.GetSection("OpenAI"));
 
+// Configure Completion settings
+builder.Services.Configure<RecallAI.Api.Models.Configuration.CompletionDefaults>(
+    builder.Configuration.GetSection("Completion"));
+
 // Register repositories
 builder.Services.AddScoped<IMemoryRepository, MemoryRepository>();
 
@@ -60,6 +64,7 @@ builder.Services.AddHttpClient<EmbeddingService>();
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 builder.Services.AddHttpClient<OpenAIService>();
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
+builder.Services.AddScoped<ICompletionPipelineService, CompletionPipelineService>();
 
 // JWT Authentication for Supabase tokens
 var jwtSecret = Environment.GetEnvironmentVariable("SUPABASE_JWT_SECRET")

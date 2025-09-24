@@ -104,4 +104,98 @@ public class OpenAIService : IOpenAIService
             throw;
         }
     }
+
+    public async IAsyncEnumerable<string> GenerateStreamingCompletionAsync(
+        string prompt, 
+        string? model = null, 
+        double? temperature = null, 
+        int? maxTokens = null, 
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var selectedModel = model ?? _openAIConfig.Models.FinalResult;
+        var selectedTemperature = temperature ?? 0.7;
+        var selectedMaxTokens = maxTokens ?? 2000;
+
+        var requestBody = new
+        {
+            model = selectedModel,
+            messages = new[]
+            {
+                new { role = "user", content = prompt }
+            },
+            max_tokens = selectedMaxTokens,
+            temperature = selectedTemperature,
+            stream = true
+        };
+
+        var json = JsonSerializer.Serialize(requestBody);
+        var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
+        {
+            Content = content
+        };
+
+        HttpResponseMessage response;
+        try
+        {
+            response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send request to OpenAI API using model {Model}", selectedModel);
+            yield break;
+        }
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("OpenAI API request failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+            yield break;
+        }
+
+        using (response)
+        using (var stream = await response.Content.ReadAsStreamAsync())
+        using (var reader = new StreamReader(stream))
+        {
+            string? line;
+            while ((line = await reader.ReadLineAsync()) != null && !cancellationToken.IsCancellationRequested)
+            {
+                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
+                    continue;
+
+                var data = line.Substring(6); // Remove "data: " prefix
+                
+                if (data == "[DONE]")
+                    break;
+
+                JsonElement jsonData;
+                try
+                {
+                    jsonData = JsonSerializer.Deserialize<JsonElement>(data);
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to parse streaming response chunk: {Data}", data);
+                    continue;
+                }
+                
+                if (jsonData.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+                {
+                    var choice = choices[0];
+                    if (choice.TryGetProperty("delta", out var delta) &&
+                        delta.TryGetProperty("content", out var contentProperty))
+                    {
+                        var contentChunk = contentProperty.GetString();
+                        if (!string.IsNullOrEmpty(contentChunk))
+                        {
+                            yield return contentChunk;
+                        }
+                    }
+                }
+            }
+        }
+
+        _logger.LogDebug("Completed streaming completion using model {Model}", selectedModel);
+    }
 }
