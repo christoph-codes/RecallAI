@@ -1,13 +1,13 @@
 "use client";
 
+import Button from "@/components/button";
+import Input from "@/components/input";
 import { useAuthGuard } from "@/hooks/useAuthGuard";
-import { useState } from "react";
-
-type IntentType = "ask" | "analyze" | "create" | "brainstorm" | "code";
+import { useCreateMemory } from "@/queries";
+import { FormEvent, useState } from "react";
 
 interface ResultCard {
   id: string;
-  type: IntentType;
   query: string;
   result: string;
   timestamp: Date;
@@ -18,52 +18,8 @@ const Dashboard = () => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ResultCard[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-
-  const intents = {
-    ask: {
-      icon: "❓",
-      label: "Ask",
-      color: "from-blue-600/10 to-blue-700/10",
-      borderColor: "border-blue-500/20",
-      textColor: "text-blue-300",
-      placeholder:
-        "Ask me anything... What would you like to know or understand?",
-    },
-    analyze: {
-      icon: "📊",
-      label: "Analyze",
-      color: "from-green-600/10 to-green-700/10",
-      borderColor: "border-green-500/20",
-      textColor: "text-green-300",
-      placeholder: "Paste data, text, or describe what you need analyzed...",
-    },
-    create: {
-      icon: "✨",
-      label: "Create",
-      color: "from-gray-600/10 to-gray-700/10",
-      borderColor: "border-gray-500/20",
-      textColor: "text-gray-300",
-      placeholder:
-        "Describe what you want to create... content, ideas, plans...",
-    },
-    brainstorm: {
-      icon: "💡",
-      label: "Brainstorm",
-      color: "from-purple-600/10 to-purple-700/10",
-      borderColor: "border-purple-500/20",
-      textColor: "text-purple-300",
-      placeholder: "Share your challenge or topic for creative exploration...",
-    },
-    code: {
-      icon: "⚡",
-      label: "Code",
-      color: "from-indigo-600/10 to-indigo-700/10",
-      borderColor: "border-indigo-500/20",
-      textColor: "text-indigo-300",
-      placeholder:
-        "Describe the code, function, or technical solution you need...",
-    },
-  };
+  const { createMemoryMutation: createMemory } = useCreateMemory();
+  const [processingMessage, setProcessingMessage] = useState("");
 
   if (loading) {
     return (
@@ -75,56 +31,33 @@ const Dashboard = () => {
     );
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     if (!query.trim()) return;
 
+    // Store the query message and clear input immediately
+    const userMessage = query.trim();
+    setQuery("");
+
     setIsProcessing(true);
+    setProcessingMessage(userMessage);
 
-    // Auto-detect intent based on query content (simplified logic)
-    const detectIntent = (text: string): IntentType => {
-      const lowerText = text.toLowerCase();
-      if (
-        lowerText.includes("code") ||
-        lowerText.includes("function") ||
-        lowerText.includes("programming")
-      )
-        return "code";
-      if (
-        lowerText.includes("analyze") ||
-        lowerText.includes("data") ||
-        lowerText.includes("review")
-      )
-        return "analyze";
-      if (
-        lowerText.includes("create") ||
-        lowerText.includes("write") ||
-        lowerText.includes("make")
-      )
-        return "create";
-      if (
-        lowerText.includes("brainstorm") ||
-        lowerText.includes("ideas") ||
-        lowerText.includes("think")
-      )
-        return "brainstorm";
-      return "ask"; // default
-    };
-
-    const detectedIntent = detectIntent(query);
+    createMemory({ content: userMessage }).catch((err) => {
+      console.error("Error creating memory:", err);
+    });
 
     // Simulate processing
     setTimeout(() => {
       const newResult: ResultCard = {
         id: Date.now().toString(),
-        type: detectedIntent,
-        query: query.trim(),
-        result: `This is a placeholder result for your ${detectedIntent} request: "${query.trim()}". The actual implementation would process this through your AI backend.`,
+        query: userMessage,
+        result: `This is a placeholder result for your request: "${userMessage}". The actual implementation would process this through your AI backend.`,
         timestamp: new Date(),
       };
 
       setResults((prev) => [newResult, ...prev]);
-      setQuery(""); // Keep input box open but clear the text
       setIsProcessing(false);
+      setProcessingMessage("");
     }, 2000);
   };
 
@@ -142,8 +75,8 @@ const Dashboard = () => {
       <div className="flex-1 overflow-y-auto pb-32">
         {/* Processing State */}
         {isProcessing && (
-          <div className="max-w-4xl mx-auto mb-6 px-6">
-            <div className="bg-gray-800/50 backdrop-blur-md rounded-2xl p-6 border border-gray-700/50 shadow-lg">
+          <div className="max-w-4xl mx-auto p-3">
+            <div className="bg-gray-800/50 backdrop-blur-md rounded-2xl p-6 border border-white/50 shadow-lg">
               <div className="flex items-center gap-4">
                 <div className="w-8 h-8 bg-gray-700/50 backdrop-blur-sm rounded-full flex items-center justify-center animate-pulse">
                   <span className="text-gray-300">🧠</span>
@@ -152,7 +85,10 @@ const Dashboard = () => {
                   <div className="text-gray-200 font-medium mb-1">
                     Processing your request...
                   </div>
-                  <div className="text-gray-400 text-sm">
+                  <div className="text-gray-400 text-sm mb-2">
+                    &ldquo;{processingMessage}&rdquo;
+                  </div>
+                  <div className="text-gray-500 text-xs">
                     Analyzing and generating results
                   </div>
                 </div>
@@ -176,7 +112,7 @@ const Dashboard = () => {
         )}
 
         {/* Results */}
-        <div className="space-y-4 max-w-4xl mx-auto px-6">
+        <div className="space-y-4 max-w-4xl mx-auto p-3">
           {results.map((result) => (
             <div
               key={result.id}
@@ -185,25 +121,11 @@ const Dashboard = () => {
               <div className="p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`w-8 h-8 bg-gradient-to-r ${
-                        intents[result.type].color
-                      } backdrop-blur-sm rounded-full flex items-center justify-center border ${
-                        intents[result.type].borderColor
-                      }`}
-                    >
-                      <span className="text-gray-300 text-sm">
-                        {intents[result.type].icon}
-                      </span>
+                    <div className="w-8 h-8 bg-gray-700/50 backdrop-blur-sm rounded-full flex items-center justify-center border border-gray-600/30">
+                      <span className="text-gray-300 text-sm">💭</span>
                     </div>
                     <div>
-                      <div
-                        className={`font-medium ${
-                          intents[result.type].textColor
-                        }`}
-                      >
-                        {intents[result.type].label}
-                      </div>
+                      <div className="font-medium text-gray-200">Response</div>
                       <div className="text-gray-500 text-xs">
                         {result.timestamp.toLocaleTimeString()}
                       </div>
@@ -257,28 +179,25 @@ const Dashboard = () => {
         <div className="max-w-4xl mx-auto">
           <div className="bg-gray-800/50 backdrop-blur-xl rounded-2xl border border-gray-700/50 shadow-2xl p-4">
             <div className="flex items-end gap-3">
-              <div className="flex-1">
-                <textarea
+              <form
+                onSubmit={handleSubmit}
+                className="flex items-stretch flex-1 gap-2"
+              >
+                <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="What's on your mind? Ask questions, request analysis, create content, brainstorm ideas, or get help with code..."
-                  className="w-full bg-transparent text-gray-200 placeholder-gray-400 resize-none focus:outline-none text-sm leading-relaxed min-h-[40px] max-h-32 py-2"
-                  rows={2}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSubmit();
-                    }
-                  }}
+                  placeholder="What's on your mind?"
+                  //   className="w-full bg-transparent text-gray-200 placeholder-gray-400 resize-none focus:outline-none text-sm leading-relaxed min-h-[40px] max-h-32 py-2"
+                  //   rows={2}
                 />
-              </div>
-              <button
-                onClick={handleSubmit}
-                disabled={!query.trim() || isProcessing}
-                className="bg-gray-700/50 hover:bg-gray-600/50 backdrop-blur-sm rounded-xl px-6 py-3 border border-gray-600/30 transition-all duration-200 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-orange-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-              >
-                <span className="text-gray-200 font-medium">Submit</span>
-              </button>
+                <Button
+                  type="submit"
+                  disabled={!query.trim() || isProcessing}
+                  variant="glass"
+                >
+                  <span className="text-gray-200 font-medium">Submit</span>
+                </Button>
+              </form>
             </div>
           </div>
         </div>
