@@ -18,7 +18,7 @@ const Button = ({
   disabled = false,
 }: Readonly<ButtonProps>) => {
   const baseStyles =
-    "px-4 py-2 rounded-md font-bold focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors cursor-pointer min-w-[120px] text-center disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-current";
+    "px-4 py-2 rounded-md font-bold focus:outline-none focus:ring-1 focus:ring-offset-1 transition-colors cursor-pointer min-w-[120px] text-center disabled:opacity-50 disabled:cursor-auto disabled:hover:bg-current";
   const variants = {
     primary:
       "bg-orange-500 text-white border border-orange-500 hover:bg-orange-600 hover:border-orange-600 rounded px-4 py-2 cursor-pointer focus:ring-orange-400 disabled:hover:bg-orange-500 disabled:hover:border-orange-500",
@@ -29,7 +29,7 @@ const Button = ({
     danger:
       "bg-red-600 text-white hover:bg-red-700 focus:ring-red-500 disabled:hover:bg-red-600",
     glass:
-      "bg-gray-700/50 backdrop-blur-sm rounded-xl hover:border-primary-light border border-gray-600/30 transition-all duration-200 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-orange-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100",
+      "bg-gray-700/50 backdrop-blur-sm rounded-xl hover:border-primary-light border border-gray-600/30 transition-all duration-200 focus:outline-none focus:ring-1 focus:ring-orange-500/50 disabled:opacity-50 hover:bg-primary hover:border-orange-500 disabled:hover:border-transparent disabled:hover:bg-gray-700/50",
   };
 
   return (

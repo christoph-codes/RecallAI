@@ -3,13 +3,11 @@
 import Button from "@/components/button";
 import Input from "@/components/input";
 import { useAuthGuard } from "@/hooks/useAuthGuard";
+import { useCreateMemory } from "@/queries";
 import { FormEvent, useState } from "react";
-
-type IntentType = "ask" | "analyze" | "create" | "brainstorm" | "code";
 
 interface ResultCard {
   id: string;
-  type: IntentType;
   query: string;
   result: string;
   timestamp: Date;
@@ -20,52 +18,8 @@ const Dashboard = () => {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ResultCard[]>([]);
   const [isProcessing, setIsProcessing] = useState(false);
-
-  const intents = {
-    ask: {
-      icon: "❓",
-      label: "Ask",
-      color: "from-blue-600/10 to-blue-700/10",
-      borderColor: "border-blue-500/20",
-      textColor: "text-blue-300",
-      placeholder:
-        "Ask me anything... What would you like to know or understand?",
-    },
-    analyze: {
-      icon: "📊",
-      label: "Analyze",
-      color: "from-green-600/10 to-green-700/10",
-      borderColor: "border-green-500/20",
-      textColor: "text-green-300",
-      placeholder: "Paste data, text, or describe what you need analyzed...",
-    },
-    create: {
-      icon: "✨",
-      label: "Create",
-      color: "from-gray-600/10 to-gray-700/10",
-      borderColor: "border-gray-500/20",
-      textColor: "text-gray-300",
-      placeholder:
-        "Describe what you want to create... content, ideas, plans...",
-    },
-    brainstorm: {
-      icon: "💡",
-      label: "Brainstorm",
-      color: "from-purple-600/10 to-purple-700/10",
-      borderColor: "border-purple-500/20",
-      textColor: "text-purple-300",
-      placeholder: "Share your challenge or topic for creative exploration...",
-    },
-    code: {
-      icon: "⚡",
-      label: "Code",
-      color: "from-indigo-600/10 to-indigo-700/10",
-      borderColor: "border-indigo-500/20",
-      textColor: "text-indigo-300",
-      placeholder:
-        "Describe the code, function, or technical solution you need...",
-    },
-  };
+  const { createMemoryMutation: createMemory } = useCreateMemory();
+  const [processingMessage, setProcessingMessage] = useState("");
 
   if (loading) {
     return (
@@ -81,53 +35,29 @@ const Dashboard = () => {
     e.preventDefault();
     if (!query.trim()) return;
 
+    // Store the query message and clear input immediately
+    const userMessage = query.trim();
+    setQuery("");
+
     setIsProcessing(true);
+    setProcessingMessage(userMessage);
 
-    // Auto-detect intent based on query content (simplified logic)
-    const detectIntent = (text: string): IntentType => {
-      const lowerText = text.toLowerCase();
-      if (
-        lowerText.includes("code") ||
-        lowerText.includes("function") ||
-        lowerText.includes("programming")
-      )
-        return "code";
-      if (
-        lowerText.includes("analyze") ||
-        lowerText.includes("data") ||
-        lowerText.includes("review")
-      )
-        return "analyze";
-      if (
-        lowerText.includes("create") ||
-        lowerText.includes("write") ||
-        lowerText.includes("make")
-      )
-        return "create";
-      if (
-        lowerText.includes("brainstorm") ||
-        lowerText.includes("ideas") ||
-        lowerText.includes("think")
-      )
-        return "brainstorm";
-      return "ask"; // default
-    };
-
-    const detectedIntent = detectIntent(query);
+    createMemory({ content: userMessage }).catch((err) => {
+      console.error("Error creating memory:", err);
+    });
 
     // Simulate processing
     setTimeout(() => {
       const newResult: ResultCard = {
         id: Date.now().toString(),
-        type: detectedIntent,
-        query: query.trim(),
-        result: `This is a placeholder result for your ${detectedIntent} request: "${query.trim()}". The actual implementation would process this through your AI backend.`,
+        query: userMessage,
+        result: `This is a placeholder result for your request: "${userMessage}". The actual implementation would process this through your AI backend.`,
         timestamp: new Date(),
       };
 
       setResults((prev) => [newResult, ...prev]);
-      setQuery(""); // Keep input box open but clear the text
       setIsProcessing(false);
+      setProcessingMessage("");
     }, 2000);
   };
 
@@ -155,7 +85,10 @@ const Dashboard = () => {
                   <div className="text-gray-200 font-medium mb-1">
                     Processing your request...
                   </div>
-                  <div className="text-gray-400 text-sm">
+                  <div className="text-gray-400 text-sm mb-2">
+                    &ldquo;{processingMessage}&rdquo;
+                  </div>
+                  <div className="text-gray-500 text-xs">
                     Analyzing and generating results
                   </div>
                 </div>
@@ -188,25 +121,11 @@ const Dashboard = () => {
               <div className="p-4">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex items-center gap-3">
-                    <div
-                      className={`w-8 h-8 bg-gradient-to-r ${
-                        intents[result.type].color
-                      } backdrop-blur-sm rounded-full flex items-center justify-center border ${
-                        intents[result.type].borderColor
-                      }`}
-                    >
-                      <span className="text-gray-300 text-sm">
-                        {intents[result.type].icon}
-                      </span>
+                    <div className="w-8 h-8 bg-gray-700/50 backdrop-blur-sm rounded-full flex items-center justify-center border border-gray-600/30">
+                      <span className="text-gray-300 text-sm">💭</span>
                     </div>
                     <div>
-                      <div
-                        className={`font-medium ${
-                          intents[result.type].textColor
-                        }`}
-                      >
-                        {intents[result.type].label}
-                      </div>
+                      <div className="font-medium text-gray-200">Response</div>
                       <div className="text-gray-500 text-xs">
                         {result.timestamp.toLocaleTimeString()}
                       </div>

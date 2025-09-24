@@ -48,7 +48,7 @@ const Sidenav = ({ isOpen, onClose }: SidenavProps) => {
           />
           <button
             onClick={onClose}
-            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors"
+            className="p-2 text-gray-400 hover:text-white hover:bg-gray-700 rounded-lg transition-colors cursor-pointer"
             aria-label="Close menu"
           >
             <svg
