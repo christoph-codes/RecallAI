@@ -1,7 +1,9 @@
 "use client";
 
+import Button from "@/components/button";
+import Input from "@/components/input";
 import { useAuthGuard } from "@/hooks/useAuthGuard";
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 
 type IntentType = "ask" | "analyze" | "create" | "brainstorm" | "code";
 
@@ -75,7 +77,8 @@ const Dashboard = () => {
     );
   }
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
     if (!query.trim()) return;
 
     setIsProcessing(true);
@@ -142,8 +145,8 @@ const Dashboard = () => {
       <div className="flex-1 overflow-y-auto pb-32">
         {/* Processing State */}
         {isProcessing && (
-          <div className="max-w-4xl mx-auto mb-6 px-6">
-            <div className="bg-gray-800/50 backdrop-blur-md rounded-2xl p-6 border border-gray-700/50 shadow-lg">
+          <div className="max-w-4xl mx-auto p-3">
+            <div className="bg-gray-800/50 backdrop-blur-md rounded-2xl p-6 border border-white/50 shadow-lg">
               <div className="flex items-center gap-4">
                 <div className="w-8 h-8 bg-gray-700/50 backdrop-blur-sm rounded-full flex items-center justify-center animate-pulse">
                   <span className="text-gray-300">🧠</span>
@@ -176,7 +179,7 @@ const Dashboard = () => {
         )}
 
         {/* Results */}
-        <div className="space-y-4 max-w-4xl mx-auto px-6">
+        <div className="space-y-4 max-w-4xl mx-auto p-3">
           {results.map((result) => (
             <div
               key={result.id}
@@ -257,28 +260,25 @@ const Dashboard = () => {
         <div className="max-w-4xl mx-auto">
           <div className="bg-gray-800/50 backdrop-blur-xl rounded-2xl border border-gray-700/50 shadow-2xl p-4">
             <div className="flex items-end gap-3">
-              <div className="flex-1">
-                <textarea
+              <form
+                onSubmit={handleSubmit}
+                className="flex items-stretch flex-1 gap-2"
+              >
+                <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="What's on your mind? Ask questions, request analysis, create content, brainstorm ideas, or get help with code..."
-                  className="w-full bg-transparent text-gray-200 placeholder-gray-400 resize-none focus:outline-none text-sm leading-relaxed min-h-[40px] max-h-32 py-2"
-                  rows={2}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSubmit();
-                    }
-                  }}
+                  placeholder="What's on your mind?"
+                  //   className="w-full bg-transparent text-gray-200 placeholder-gray-400 resize-none focus:outline-none text-sm leading-relaxed min-h-[40px] max-h-32 py-2"
+                  //   rows={2}
                 />
-              </div>
-              <button
-                onClick={handleSubmit}
-                disabled={!query.trim() || isProcessing}
-                className="bg-gray-700/50 hover:bg-gray-600/50 backdrop-blur-sm rounded-xl px-6 py-3 border border-gray-600/30 transition-all duration-200 hover:scale-105 focus:outline-none focus:ring-2 focus:ring-orange-500/50 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
-              >
-                <span className="text-gray-200 font-medium">Submit</span>
-              </button>
+                <Button
+                  type="submit"
+                  disabled={!query.trim() || isProcessing}
+                  variant="glass"
+                >
+                  <span className="text-gray-200 font-medium">Submit</span>
+                </Button>
+              </form>
             </div>
           </div>
         </div>
