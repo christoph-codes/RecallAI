@@ -10,12 +10,14 @@ This repository contains two main components:
 - **Framework**: React with App Router
 - **Styling**: Tailwind CSS for utility-first styling
 - **Deployment**: Configured for Vercel
+- **LIVE URL**: [https://recall-ai-topaz.vercel.app](https://recall-ai-topaz.vercel.app)
 
 ### Backend (`/backend`)
 - **Technology**: .NET 8 Web API
 - **Framework**: ASP.NET Core
 - **Language**: C#
 - **Deployment**: Configured for Render.com
+- **LIVE URL**: [https://recallai-rv22.onrender.com](https://recallai-rv22.onrender.com/)
 
 ## Getting Started
 

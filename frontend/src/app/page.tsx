@@ -1,18 +1,41 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
-  return (
-    <div className="bg-primary font-sans flex items-center justify-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="text-white"
-          src="/recall_white.svg"
-          alt="Recall logo"
-          width={180}
-          height={38}
-          priority
-        />
+import { useUser } from "@/contexts/UserContext";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import Login from "@/app/Login";
+
+export default function Page() {
+  const { user, loading } = useUser();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (!loading && user) {
+      router.push("/dashboard");
+    }
+  }, [user, loading, router]);
+
+  // Show loading while checking auth state
+  if (loading) {
+    return (
+      <main className="flex flex-col gap-8 items-center justify-center sm:items-start p-8 pb-20 sm:p-20 min-h-screen bg-gray-900">
+        <div className="text-center">
+          <div className="text-xl text-gray-200">Loading...</div>
+        </div>
       </main>
-    </div>
+    );
+  }
+
+  // Don't render login if user is authenticated (will redirect)
+  if (user) {
+    return null;
+  }
+
+  return (
+    <main className="flex flex-col gap-8 items-center justify-center sm:items-start p-8 pb-20 sm:p-20 min-h-screen bg-gray-900">
+      <div className="flex flex-col gap-4 text-center sm:text-left items-center justify-center w-full">
+        <Login />
+      </div>
+    </main>
   );
 }
