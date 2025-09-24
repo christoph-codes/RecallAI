@@ -62,8 +62,8 @@ const Login = () => {
         priority
       />
       <p className="max-w-prose text-balance text-xl font-bold text-gray-200 text-center">
-        Save a thought once,{" "}
-        <span className="text-orange-500 underline">recall</span> it anytime.
+        Save a thought once, <span className="text-orange-500">recall</span> it
+        anytime.
       </p>
       <p className="max-w-prose  text-base text-gray-300 text-center">
         Think less about remembering, and more about what matters today.
