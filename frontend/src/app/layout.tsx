@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import ClientProviders from "@/components/ClientProviders";
 
 export const metadata: Metadata = {
-  title: "RecallAI",
-  description: "AI Memory for everyone",
+  title: "Recall AI",
+  description: "Remember the things that matter most.",
 };
 
 export default function RootLayout({
@@ -13,7 +14,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased bg-primary">{children}</body>
+      <body className="antialiased bg-primary font-sans">
+        <ClientProviders>{children}</ClientProviders>
+      </body>
     </html>
   );
 }
