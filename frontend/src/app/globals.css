@@ -4,9 +4,13 @@
   --color-primary: #E34D11;
   --color-primary-light: #F56B3A;
   --color-primary-dark: #B33D0E;
+  --color-secondary: #23272F;
+  --color-secondary-light: #374151;
+  --color-secondary-dark: #181A1F;
   --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
+
 
 body {
   background: var(--color-primary);
