@@ -4,7 +4,9 @@ using RecallAI.Api.Extensions;
 using RecallAI.Api.Interfaces;
 using RecallAI.Api.Models;
 using RecallAI.Api.Models.Dto;
+using RecallAI.Api.Models.Search;
 using System.ComponentModel.DataAnnotations;
+using System.Diagnostics;
 
 namespace RecallAI.Api.Controllers;
 
@@ -14,11 +16,13 @@ namespace RecallAI.Api.Controllers;
 public class MemoryController : ControllerBase
 {
     private readonly IMemoryRepository _memoryRepository;
+    private readonly IEmbeddingService _embeddingService;
     private readonly ILogger<MemoryController> _logger;
 
-    public MemoryController(IMemoryRepository memoryRepository, ILogger<MemoryController> logger)
+    public MemoryController(IMemoryRepository memoryRepository, IEmbeddingService embeddingService, ILogger<MemoryController> logger)
     {
         _memoryRepository = memoryRepository;
+        _embeddingService = embeddingService;
         _logger = logger;
     }
 
@@ -254,6 +258,88 @@ public class MemoryController : ControllerBase
         {
             _logger.LogError(ex, "Error deleting memory {MemoryId}", id);
             return StatusCode(500, new { Message = "An error occurred while deleting the memory" });
+        }
+    }
+
+    [HttpGet("search")]
+    public async Task<ActionResult<SearchResponse>> SearchMemories(
+        [FromQuery, Required] string query,
+        [FromQuery] int limit = 10,
+        [FromQuery] double threshold = 0.7)
+    {
+        // Validate query parameters
+        if (string.IsNullOrWhiteSpace(query))
+            return BadRequest(new { Message = "Query parameter is required" });
+
+        if (query.Length > 500)
+            return BadRequest(new { Message = "Query must be 500 characters or less" });
+
+        if (limit < 1 || limit > 50)
+            return BadRequest(new { Message = "Limit must be between 1 and 50" });
+
+        if (threshold < 0.0 || threshold > 1.0)
+            return BadRequest(new { Message = "Threshold must be between 0.0 and 1.0" });
+
+        var stopwatch = Stopwatch.StartNew();
+
+        try
+        {
+            var userId = Guid.Parse(HttpContext.GetCurrentUserIdOrThrow());
+
+            // Generate embedding for search query
+            float[] queryEmbedding;
+            try
+            {
+                queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(query);
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "Failed to generate embedding for search query");
+                return StatusCode(503, new { Message = "Search service temporarily unavailable" });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error generating embedding for search query");
+                return StatusCode(500, new { Message = "An error occurred while processing the search query" });
+            }
+
+            // Perform vector similarity search
+            var searchResults = await _memoryRepository.SearchSimilarAsync(userId, queryEmbedding, limit, threshold);
+
+            stopwatch.Stop();
+
+            // Map to response model
+            var response = new SearchResponse
+            {
+                Query = query,
+                ResultCount = searchResults.Count,
+                ExecutionTimeMs = (int)stopwatch.ElapsedMilliseconds,
+                Results = searchResults.Select(result => new SearchResultItem
+                {
+                    Id = result.memory.Id,
+                    Title = result.memory.Title,
+                    Content = result.memory.Content,
+                    ContentType = result.memory.ContentType,
+                    SimilarityScore = Math.Round(result.similarity, 4), // Round to 4 decimal places
+                    CreatedAt = result.memory.CreatedAt,
+                    Metadata = result.memory.Metadata
+                }).ToList()
+            };
+
+            _logger.LogInformation("Search completed for user {UserId}: query='{Query}', results={ResultCount}, time={ExecutionTimeMs}ms",
+                userId, query, response.ResultCount, response.ExecutionTimeMs);
+
+            return Ok(response);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Unauthorized(new { Message = "User authentication required" });
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            _logger.LogError(ex, "Error performing memory search for query: {Query}", query);
+            return StatusCode(500, new { Message = "An error occurred while searching memories" });
         }
     }
 }
