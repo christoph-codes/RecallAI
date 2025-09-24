@@ -1,0 +1,15 @@
+meta {
+  name: get /api/Auth/me
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{recallApi_baseUrl}}/api/Auth/me
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}

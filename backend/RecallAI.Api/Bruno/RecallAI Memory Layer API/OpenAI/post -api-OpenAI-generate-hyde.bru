@@ -1,0 +1,21 @@
+meta {
+  name: post /api/OpenAI/generate-hyde
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/OpenAI/generate-hyde
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "query": ""
+  }
+}

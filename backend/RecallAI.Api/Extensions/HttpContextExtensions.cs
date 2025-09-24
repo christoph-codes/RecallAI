@@ -30,4 +30,14 @@ public static class HttpContextExtensions
         }
         return userId;
     }
+
+    public static Guid GetUserId(this HttpContext httpContext)
+    {
+        var userIdString = httpContext.GetCurrentUserId();
+        if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out var userId))
+        {
+            return Guid.Empty;
+        }
+        return userId;
+    }
 }

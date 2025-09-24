@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using RecallAI.Api.Extensions;
 using RecallAI.Api.Interfaces;
 using RecallAI.Api.Models;
@@ -128,8 +129,8 @@ public class MemoryController : ControllerBase
 
         try
         {
+            
             var userId = Guid.Parse(HttpContext.GetCurrentUserIdOrThrow());
-
             var memory = new Memory
             {
                 UserId = userId,

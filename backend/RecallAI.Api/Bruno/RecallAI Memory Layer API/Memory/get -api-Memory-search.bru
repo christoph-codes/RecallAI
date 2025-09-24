@@ -1,0 +1,21 @@
+meta {
+  name: get /api/Memory/search
+  type: http
+  seq: 6
+}
+
+get {
+  url: {{baseUrl}}/api/Memory/search
+  body: none
+  auth: bearer
+}
+
+params:query {
+  query: 
+  ~limit: 
+  ~threshold: 
+}
+
+auth:bearer {
+  token: {{token}}
+}

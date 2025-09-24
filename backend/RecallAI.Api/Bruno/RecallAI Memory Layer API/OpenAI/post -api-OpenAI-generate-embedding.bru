@@ -1,0 +1,21 @@
+meta {
+  name: post /api/OpenAI/generate-embedding
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/OpenAI/generate-embedding
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "text": ""
+  }
+}
