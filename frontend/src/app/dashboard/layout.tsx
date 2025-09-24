@@ -1,16 +1,16 @@
 "use client";
-import Button from "@/components/button";
-import { useUser } from "@/contexts/UserContext";
 import Image from "next/image";
 import { ReactNode } from "react";
+import Sidenav from "@/components/Sidenav";
+import { useToggle } from "@/hooks/useToggle";
 
 const DashboardLayout = ({ children }: { children: ReactNode }) => {
-  const { user, signOut } = useUser();
+  const sidenav = useToggle(false);
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-900">
-      <div className="max-w-4xl mx-auto w-full flex flex-col h-screen">
-        {/* Header with Logo and User Actions */}
+      <div className="max-w-4xl gap-2 mx-auto w-full flex flex-col h-screen">
+        {/* Header with Logo and Hamburger Menu */}
         <div className="flex justify-between items-center p-4 pb-3 flex-shrink-0 border-b border-gray-700/50">
           <div className="flex items-center">
             <Image
@@ -22,12 +22,27 @@ const DashboardLayout = ({ children }: { children: ReactNode }) => {
               className="h-6 w-auto"
             />
           </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-400">Hello, {user?.email}</span>
-            <Button variant="secondary" onClick={signOut}>
-              Sign Out
-            </Button>
-          </div>
+
+          {/* Hamburger Menu Button */}
+          <button
+            onClick={sidenav.toggle}
+            className="p-2 cursor-pointer text-gray-300 hover:text-white hover:bg-gray-800 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-orange-500/50"
+            aria-label="Open menu"
+          >
+            <svg
+              className="w-6 h-6"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
+            </svg>
+          </button>
         </div>
 
         {/* Main Content Area */}
@@ -35,6 +50,9 @@ const DashboardLayout = ({ children }: { children: ReactNode }) => {
           {children}
         </div>
       </div>
+
+      {/* Sidenav Component */}
+      <Sidenav isOpen={sidenav.isOpen} onClose={sidenav.close} />
     </div>
   );
 };
