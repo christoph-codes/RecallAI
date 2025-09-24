@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: recallai-api
+    runtime: docker
+    plan: free
+    region: oregon
+    buildCommand: docker build -t recallai-api .
+    startCommand: dotnet RecallAI.Api.dll
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production
+      - key: ASPNETCORE_URLS
+        value: http://+:$PORT
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+    healthCheckPath: /api/health
