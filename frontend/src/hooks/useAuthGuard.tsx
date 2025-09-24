@@ -10,7 +10,7 @@ interface UseAuthGuardOptions {
 }
 
 export const useAuthGuard = ({
-  redirectTo = "/auth/login",
+  redirectTo = "/",
   requireAuth = true,
 }: UseAuthGuardOptions = {}) => {
   const { user, loading } = useUser();
