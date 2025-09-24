@@ -11,4 +11,8 @@ public interface IMemoryRepository
     Task<Memory> UpdateAsync(Memory memory);
     Task<bool> DeleteAsync(Guid id, Guid userId);
     Task<bool> ExistsAsync(Guid id, Guid userId);
+    
+    // Vector search methods
+    Task<List<(Memory memory, double similarity)>> SearchSimilarAsync(Guid userId, float[] queryEmbedding, int limit, double threshold);
+    Task<bool> HasEmbeddingAsync(Guid memoryId);
 }

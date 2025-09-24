@@ -4,7 +4,9 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using RecallAI.Api.Data;
 using RecallAI.Api.Interfaces;
+using RecallAI.Api.Models.Configuration;
 using RecallAI.Api.Repositories;
+using RecallAI.Api.Services;
 using System.Text;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -46,8 +48,18 @@ builder.Services.AddDbContext<MemoryDbContext>(options =>
     }
 });
 
+// Configure OpenAI settings
+builder.Services.Configure<OpenAIConfiguration>(
+    builder.Configuration.GetSection("OpenAI"));
+
 // Register repositories
 builder.Services.AddScoped<IMemoryRepository, MemoryRepository>();
+
+// Register services
+builder.Services.AddHttpClient<EmbeddingService>();
+builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
+builder.Services.AddHttpClient<OpenAIService>();
+builder.Services.AddScoped<IOpenAIService, OpenAIService>();
 
 // JWT Authentication for Supabase tokens
 var jwtSecret = Environment.GetEnvironmentVariable("SUPABASE_JWT_SECRET")
