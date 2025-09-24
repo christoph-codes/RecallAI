@@ -1,0 +1,25 @@
+meta {
+  name: post /api/Completion
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{recallApi_baseUrl}}/api/Completion
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "message": "",
+    "configuration": {
+      "model": "",
+      "temperature": "",
+      "maxTokens": 0,
+      "enableMemorySearch": false,
+      "maxMemoryResults": 0,
+      "memoryThreshold": ""
+    }
+  }
+}

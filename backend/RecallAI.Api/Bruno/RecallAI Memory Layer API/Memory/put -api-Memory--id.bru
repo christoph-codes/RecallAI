@@ -1,0 +1,28 @@
+meta {
+  name: put /api/Memory/:id
+  type: http
+  seq: 4
+}
+
+put {
+  url: {{baseUrl}}/api/Memory/:id
+  body: json
+  auth: bearer
+}
+
+params:path {
+  id: 
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "title": "",
+    "content": "",
+    "contentType": "",
+    "metadata": {}
+  }
+}

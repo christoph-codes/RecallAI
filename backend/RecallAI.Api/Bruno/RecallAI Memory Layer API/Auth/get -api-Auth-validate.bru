@@ -1,0 +1,15 @@
+meta {
+  name: get /api/Auth/validate
+  type: http
+  seq: 2
+}
+
+get {
+  url: {{recallApi_baseUrl}}/api/Auth/validate
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}

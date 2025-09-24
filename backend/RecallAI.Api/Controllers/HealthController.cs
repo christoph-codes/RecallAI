@@ -6,6 +6,7 @@ namespace RecallAI.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Microsoft.AspNetCore.Authorization.AllowAnonymous]
 public class HealthController : ControllerBase
 {
     private readonly MemoryDbContext _context;

@@ -7,6 +7,7 @@ namespace RecallAI.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[AllowAnonymous]
 public class AuthController : ControllerBase
 {
     private readonly ILogger<AuthController> _logger;
@@ -69,7 +70,6 @@ public class AuthController : ControllerBase
     /// Validate current token and return user info
     /// </summary>
     [HttpGet("validate")]
-    [Authorize]
     public IActionResult ValidateToken()
     {
         try

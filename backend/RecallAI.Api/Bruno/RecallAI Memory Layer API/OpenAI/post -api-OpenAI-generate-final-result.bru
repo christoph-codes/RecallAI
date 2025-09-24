@@ -1,0 +1,22 @@
+meta {
+  name: post /api/OpenAI/generate-final-result
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/OpenAI/generate-final-result
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "prompt": "",
+    "context": ""
+  }
+}

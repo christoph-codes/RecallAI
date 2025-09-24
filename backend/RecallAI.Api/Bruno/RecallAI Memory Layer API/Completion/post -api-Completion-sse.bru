@@ -1,0 +1,29 @@
+meta {
+  name: post /api/Completion/sse
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{recallApi_baseUrl}}/api/Completion/sse
+  body: json
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+body:json {
+  {
+    "message": "",
+    "configuration": {
+      "model": "",
+      "temperature": "",
+      "maxTokens": 0,
+      "enableMemorySearch": false,
+      "maxMemoryResults": 0,
+      "memoryThreshold": ""
+    }
+  }
+}
