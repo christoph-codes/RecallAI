@@ -131,7 +131,27 @@ builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:3000", "https://localhost:3000")
+        var allowedOrigins = new List<string>
+        {
+            "http://localhost:3000",
+            "https://localhost:3000"
+        };
+
+        // Add production frontend URLs from environment variables or configuration
+        var productionOrigin = Environment.GetEnvironmentVariable("FRONTEND_URL");
+        if (!string.IsNullOrEmpty(productionOrigin))
+        {
+            allowedOrigins.Add(productionOrigin);
+        }
+
+        // Add common deployment platforms
+        var vercelUrl = Environment.GetEnvironmentVariable("VERCEL_URL");
+        if (!string.IsNullOrEmpty(vercelUrl))
+        {
+            allowedOrigins.Add($"https://{vercelUrl}");
+        }
+
+        policy.WithOrigins(allowedOrigins.ToArray())
               .AllowAnyHeader()
               .AllowAnyMethod()
               .AllowCredentials();
@@ -205,6 +225,13 @@ app.UseAuthorization();
 
 app.MapControllers();
 
+// Configure port for Render.com deployment
+var port = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrEmpty(port))
+{
+    app.Urls.Add($"http://0.0.0.0:{port}");
+}
+
 // Ensure database is created (for development)
 if (app.Environment.IsDevelopment())
 {
@@ -221,4 +248,4 @@ if (app.Environment.IsDevelopment())
     }
 }
 
-app.Run();
+await app.RunAsync();
