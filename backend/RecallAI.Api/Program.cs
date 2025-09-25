@@ -63,6 +63,9 @@ builder.Services.AddDbContext<MemoryDbContext>((serviceProvider, options) =>
 builder.Services.Configure<OpenAIConfiguration>(
     builder.Configuration.GetSection("OpenAI"));
 
+builder.Services.Configure<HydeConfiguration>(
+    builder.Configuration.GetSection("HyDE"));
+
 // Configure Completion settings
 builder.Services.Configure<RecallAI.Api.Models.Configuration.CompletionDefaults>(
     builder.Configuration.GetSection("Completion"));
@@ -74,13 +77,17 @@ builder.Services.AddScoped<IMemoryRepository, MemoryRepository>();
 builder.Services.AddHttpClient<EmbeddingService>();
 builder.Services.AddScoped<IEmbeddingService, EmbeddingService>();
 builder.Services.AddHttpClient<OpenAIService>();
+builder.Services.AddHttpClient<IHydeService, HydeService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(10);
+});
 builder.Services.AddScoped<IOpenAIService, OpenAIService>();
 builder.Services.AddScoped<ICompletionPipelineService, CompletionPipelineService>();
 
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
   .AddJwtBearer(options =>
   {
-      // Prevent automatic claim type mapping (e.g., "sub" → nameidentifier)
+      // Prevent automatic claim type mapping (e.g., "sub" to nameidentifier)
       options.MapInboundClaims = false;
 
       options.TokenValidationParameters = new TokenValidationParameters
@@ -260,3 +267,4 @@ if (app.Environment.IsDevelopment())
 }
 
 await app.RunAsync();
+

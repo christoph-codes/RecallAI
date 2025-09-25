@@ -14,5 +14,6 @@ public interface IMemoryRepository
     
     // Vector search methods
     Task<List<(Memory memory, double similarity)>> SearchSimilarAsync(Guid userId, float[] queryEmbedding, int limit, double threshold);
+    Task<List<(Memory memory, double queryScore, double hydeScore)>> HybridSearchAsync(Guid userId, float[] queryEmbedding, float[] hydeEmbedding, int limit, double threshold);
     Task<bool> HasEmbeddingAsync(Guid memoryId);
 }

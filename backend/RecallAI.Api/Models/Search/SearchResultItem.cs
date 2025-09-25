@@ -15,6 +15,10 @@ public class SearchResultItem
     
     public double SimilarityScore { get; set; }
     
+    public double CombinedScore { get; set; }
+    
+    public string SearchMethod { get; set; } = "query";
+    
     public DateTimeOffset CreatedAt { get; set; }
     
     public Dictionary<string, object>? Metadata { get; set; }
