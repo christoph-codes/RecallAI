@@ -22,6 +22,15 @@ builder.Services.AddSingleton<NpgsqlDataSource>(serviceProvider =>
     var configuration = serviceProvider.GetRequiredService<IConfiguration>();
     var connString = configuration.GetConnectionString("DefaultConnection");
     
+    // Check if connection string is configured properly
+    if (string.IsNullOrEmpty(connString) || connString.Contains("YOUR_POSTGRES_CONNECTION_STRING"))
+    {
+        // For development, use a default in-memory or local connection
+        // This allows the app to start without a real database
+        connString = "Host=localhost;Database=RecallAI_Dev;Username=postgres;Password=password";
+        Console.WriteLine("Warning: Using default development connection string. Configure your actual database connection string in appsettings.json or environment variables.");
+    }
+    
     var dsb = new NpgsqlDataSourceBuilder(connString);
     dsb.EnableDynamicJson();
     return dsb.Build();
@@ -85,8 +94,6 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
 
       options.TokenValidationParameters = new TokenValidationParameters
       {
-          IssuerSigningKey = new SymmetricSecurityKey(
-          Encoding.UTF8.GetBytes(builder.Configuration["Supabase:JwtSecret"]!)),
           ValidIssuer = "https://oejmcrnsmkjlugnkbxbu.supabase.co/auth/v1",
           ValidAudience = "authenticated",
           ValidateIssuer = true,
@@ -98,6 +105,10 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
           // Tell ASP.NET which claim represents the user id (we want *raw* "sub")
           NameClaimType = "sub"
       };
+
+      // Configure to fetch Supabase's public keys from JWKS endpoint
+      options.Authority = "https://oejmcrnsmkjlugnkbxbu.supabase.co/auth/v1";
+      options.MetadataAddress = "https://oejmcrnsmkjlugnkbxbu.supabase.co/auth/v1/.well-known/jwks";
 
       options.Events = new JwtBearerEvents
       {
@@ -243,20 +254,23 @@ if (!string.IsNullOrEmpty(port))
     app.Urls.Add($"http://0.0.0.0:{port}");
 }
 
-// Ensure database is created (for development)
+// Ensure database is created (for development) - Don't block startup
 if (app.Environment.IsDevelopment())
 {
-    using var scope = app.Services.CreateScope();
-    var context = scope.ServiceProvider.GetRequiredService<MemoryDbContext>();
-    try
+    _ = Task.Run(async () =>
     {
-        await context.Database.EnsureCreatedAsync();
-        app.Logger.LogInformation("Database connection verified and tables created if needed");
-    }
-    catch (Exception ex)
-    {
-        app.Logger.LogError(ex, "Failed to connect to database or create tables");
-    }
+        try
+        {
+            using var scope = app.Services.CreateScope();
+            var context = scope.ServiceProvider.GetRequiredService<MemoryDbContext>();
+            await context.Database.EnsureCreatedAsync();
+            app.Logger.LogInformation("Database connection verified and tables created if needed");
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogError(ex, "Failed to connect to database or create tables - continuing without database");
+        }
+    });
 }
 
 await app.RunAsync();
