@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Npgsql;
@@ -15,15 +16,22 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container
 builder.Services.AddControllers();
 
-// Configure Entity Framework with PostgreSQL and vector extension
-builder.Services.AddDbContext<MemoryDbContext>(options =>
+// Register NpgsqlDataSource as singleton to avoid recreating it
+builder.Services.AddSingleton<NpgsqlDataSource>(serviceProvider =>
 {
-    var connString = builder.Configuration.GetConnectionString("DefaultConnection");
-
-    // Build an NpgsqlDataSource and enable dynamic JSON
+    var configuration = serviceProvider.GetRequiredService<IConfiguration>();
+    var connString = configuration.GetConnectionString("DefaultConnection");
+    
     var dsb = new NpgsqlDataSourceBuilder(connString);
     dsb.EnableDynamicJson();
-    var dataSource = dsb.Build();
+    return dsb.Build();
+});
+
+// Configure Entity Framework with PostgreSQL and vector extension
+builder.Services.AddDbContext<MemoryDbContext>((serviceProvider, options) =>
+{
+    // Use the singleton NpgsqlDataSource
+    var dataSource = serviceProvider.GetRequiredService<NpgsqlDataSource>();
 
     options.UseNpgsql(dataSource, npgsqlOptions =>
     {
@@ -42,6 +50,12 @@ builder.Services.AddDbContext<MemoryDbContext>(options =>
         options.EnableSensitiveDataLogging();
         options.EnableDetailedErrors();
     }
+
+    // Configure warnings to suppress the service provider warning
+    options.ConfigureWarnings(warnings =>
+    {
+        warnings.Log(CoreEventId.ManyServiceProvidersCreatedWarning);
+    });
 });
 
 
@@ -113,20 +127,41 @@ builder.Services.AddCors(options =>
         var productionOrigin = Environment.GetEnvironmentVariable("FRONTEND_URL");
         if (!string.IsNullOrEmpty(productionOrigin))
         {
+            // Remove trailing slash if present
+            productionOrigin = productionOrigin.TrimEnd('/');
             allowedOrigins.Add(productionOrigin);
         }
 
-        // Add common deployment platforms
+        // Add Vercel URL - handle trailing slashes
         var vercelUrl = Environment.GetEnvironmentVariable("VERCEL_URL");
         if (!string.IsNullOrEmpty(vercelUrl))
         {
-            allowedOrigins.Add($"https://{vercelUrl}");
+            // Remove trailing slash if present
+            vercelUrl = vercelUrl.TrimEnd('/');
+            
+            // Add with https if not already present
+            if (!vercelUrl.StartsWith("http"))
+            {
+                allowedOrigins.Add($"https://{vercelUrl}");
+            }
+            else
+            {
+                allowedOrigins.Add(vercelUrl);
+            }
         }
+
+        // Add your specific Vercel URL directly (backup)
+        allowedOrigins.Add("https://recall-ai-topaz.vercel.app");
+
+        // Log allowed origins for debugging
+        var logger = LoggerFactory.Create(builder => builder.AddConsole()).CreateLogger("CORS");
+        logger.LogInformation("CORS allowed origins: {Origins}", string.Join(", ", allowedOrigins));
 
         policy.WithOrigins(allowedOrigins.ToArray())
               .AllowAnyHeader()
               .AllowAnyMethod()
-              .AllowCredentials();
+              .AllowCredentials()
+              .SetPreflightMaxAge(TimeSpan.FromMinutes(10));
     });
 });
 
