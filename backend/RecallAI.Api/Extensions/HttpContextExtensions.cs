@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace RecallAI.Api.Extensions;
 
@@ -34,10 +35,26 @@ public static class HttpContextExtensions
     public static Guid GetUserId(this HttpContext httpContext)
     {
         var userIdString = httpContext.GetCurrentUserId();
-        if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out var userId))
+        if (string.IsNullOrEmpty(userIdString))
         {
+            // Log for debugging
+            var loggerFactory = httpContext.RequestServices.GetService<ILoggerFactory>();
+            var logger = loggerFactory?.CreateLogger("HttpContextExtensions");
+            logger?.LogWarning("No user ID found in token claims. Available claims: {Claims}", 
+                string.Join(", ", httpContext.User?.Claims?.Select(c => $"{c.Type}={c.Value}") ?? new string[0]));
             return Guid.Empty;
         }
-        return userId;
+
+        // Try to parse as GUID - Supabase user IDs should be valid UUIDs
+        if (Guid.TryParse(userIdString, out var userId))
+        {
+            return userId;
+        }
+
+        // If parsing fails, log the issue
+        var loggerFactory2 = httpContext.RequestServices.GetService<ILoggerFactory>();
+        var logger2 = loggerFactory2?.CreateLogger("HttpContextExtensions");
+        logger2?.LogError("Failed to parse user ID '{UserId}' as GUID", userIdString);
+        return Guid.Empty;
     }
 }

@@ -44,8 +44,12 @@ public class AuthController : ControllerBase
                 Id = userId,
                 Email = userEmail ?? "Unknown",
                 FullName = HttpContext.User?.FindFirst("full_name")?.Value,
-                CreatedAt = DateTime.TryParse(HttpContext.User?.FindFirst("created_at")?.Value, out var createdAt) 
-                    ? createdAt 
+                CreatedAt = DateTime.TryParse(
+                    HttpContext.User?.FindFirst("created_at")?.Value,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    System.Globalization.DateTimeStyles.AssumeUniversal,
+                    out var createdAt)
+                    ? createdAt
                     : DateTime.UtcNow
             };
 
@@ -69,6 +73,7 @@ public class AuthController : ControllerBase
     /// Validate current token and return user info
     /// </summary>
     [HttpGet("validate")]
+    [ProducesResponseType(typeof(object), 200)]
     public IActionResult ValidateToken()
     {
         try

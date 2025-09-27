@@ -27,7 +27,7 @@ const formatTime = (date: Date) => {
 
 const Dashboard = () => {
   const { loading } = useAuthGuard({ requireAuth: true });
-  const { session, user, refreshUser } = useUser();
+  const { session, refreshUser } = useUser();
   const [responses, setResponses] = useState<Response[]>([]);
   const [inputMessage, setInputMessage] = useState("");
   const responsesEndRef = useRef<HTMLDivElement>(null);
@@ -285,7 +285,7 @@ const Dashboard = () => {
                   onChange={(e) => setInputMessage(e.target.value)}
                   onKeyDown={handleKeyPress}
                   placeholder={
-                    isCompleting ? "Processing..." : "Type your question..."
+                    isCompleting ? "Processing..." : "What's on your mind?"
                   }
                   disabled={isCompleting}
                   className="flex-1 bg-gray-700/50 border border-gray-600/50 rounded-lg px-3 py-2 text-gray-200 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-orange-500/50 focus:border-transparent resize-none"
