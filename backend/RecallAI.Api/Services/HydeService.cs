@@ -1,3 +1,5 @@
+﻿using System.Collections.Generic;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -9,6 +11,8 @@ namespace RecallAI.Api.Services;
 public class HydeService : IHydeService
 {
     private const int CacheLimit = 50;
+    private static readonly Uri ResponsesEndpoint = new("https://api.openai.com/v1/responses");
+
     private readonly HttpClient _httpClient;
     private readonly HydeConfiguration _hydeConfig;
     private readonly OpenAIConfiguration _openAiConfig;
@@ -69,25 +73,22 @@ public class HydeService : IHydeService
             return cachedDocument;
         }
 
-        var prompt = BuildPrompt(query);
+        var userPrompt = BuildUserPrompt(query);
 
         try
         {
-            var requestBody = new
+            var requestPayload = new Dictionary<string, object?>
             {
-                model = _hydeConfig.Model,
-                messages = new[]
-                {
-                    new { role = "user", content = prompt }
-                },
-                max_tokens = _hydeConfig.MaxTokens,
-                temperature = 0.7
+                ["model"] = _hydeConfig.Model,
+                ["input"] = OpenAIResponseHelpers.BuildMessages(OpenAISystemPrompts.HyDE, userPrompt),
+                ["temperature"] = 0.7,
+                ["max_output_tokens"] = _hydeConfig.MaxTokens
             };
 
-            var json = JsonSerializer.Serialize(requestBody);
+            var json = JsonSerializer.Serialize(requestPayload, OpenAIResponseHelpers.RequestSerializerOptions);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            using var response = await _httpClient.PostAsync("https://api.openai.com/v1/chat/completions", content);
+            using var response = await _httpClient.PostAsync(ResponsesEndpoint, content);
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
@@ -96,11 +97,7 @@ public class HydeService : IHydeService
 
             var responseJson = await response.Content.ReadAsStringAsync();
             var responseData = JsonSerializer.Deserialize<JsonElement>(responseJson);
-            var document = responseData
-                .GetProperty("choices")[0]
-                .GetProperty("message")
-                .GetProperty("content")
-                .GetString() ?? string.Empty;
+            var document = OpenAIResponseHelpers.ExtractTextContent(responseData);
 
             if (string.IsNullOrWhiteSpace(document))
             {
@@ -128,9 +125,9 @@ public class HydeService : IHydeService
         return query.Trim();
     }
 
-    private string BuildPrompt(string query)
+    private string BuildUserPrompt(string query)
     {
-        return $"Write a detailed answer or document that would respond to this query about personal memories or notes. Be specific and informative. Keep under 500 words.\n\nQuery: {query}\n\nAnswer:";
+        return $"User Query:\n{query}";
     }
 
     private bool TryGetCachedDocument(string key, out string document)

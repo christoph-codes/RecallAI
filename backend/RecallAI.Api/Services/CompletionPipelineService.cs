@@ -1,14 +1,17 @@
+﻿using System.Collections.Generic;
+using System.Linq;
+using System.Text;
 using RecallAI.Api.Interfaces;
 using RecallAI.Api.Models.Completion;
 using RecallAI.Api.Models.Configuration;
 using Microsoft.Extensions.Options;
-using System.Text;
 
 namespace RecallAI.Api.Services;
 
 public class CompletionPipelineService : ICompletionPipelineService
 {
     private readonly IOpenAIService _openAIService;
+    private readonly IHydeService _hydeService;
     private readonly IEmbeddingService _embeddingService;
     private readonly IMemoryRepository _memoryRepository;
     private readonly CompletionDefaults _completionConfig;
@@ -16,12 +19,14 @@ public class CompletionPipelineService : ICompletionPipelineService
 
     public CompletionPipelineService(
         IOpenAIService openAIService,
+        IHydeService hydeService,
         IEmbeddingService embeddingService,
         IMemoryRepository memoryRepository,
         IOptions<CompletionDefaults> completionOptions,
         ILogger<CompletionPipelineService> logger)
     {
         _openAIService = openAIService;
+        _hydeService = hydeService;
         _embeddingService = embeddingService;
         _memoryRepository = memoryRepository;
         _completionConfig = completionOptions.Value;
@@ -49,7 +54,7 @@ public class CompletionPipelineService : ICompletionPipelineService
             {
                 memoryEvaluation = await _openAIService.EvaluateMemoryAsync(
                     request.Message,
-                    "Determine if this query would benefit from searching through the user's stored memories and knowledge base."
+                    OpenAISystemPrompts.MemoryEvaluation
                 );
                 _logger.LogDebug("Memory evaluation completed");
             }
@@ -66,7 +71,7 @@ public class CompletionPipelineService : ICompletionPipelineService
             _logger.LogDebug("Step 2: Generating HyDE document");
             try
             {
-                hydeDocument = await _openAIService.GenerateHyDEAsync(request.Message);
+                hydeDocument = await _hydeService.GenerateHypotheticalAsync(request.Message);
                 _logger.LogDebug("HyDE document generated");
             }
             catch (Exception ex)
@@ -84,14 +89,14 @@ public class CompletionPipelineService : ICompletionPipelineService
             {
                 var searchText = hydeDocument ?? request.Message;
                 var queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(searchText);
-                
+
                 relevantMemories = await _memoryRepository.SearchSimilarAsync(
                     userId,
                     queryEmbedding,
                     maxMemoryResults,
                     memoryThreshold
                 );
-                
+
                 _logger.LogDebug("Found {Count} relevant memories", relevantMemories.Count);
             }
             catch (Exception ex)
@@ -102,19 +107,19 @@ public class CompletionPipelineService : ICompletionPipelineService
 
         // Step 4: Build context and prompt
         var contextBuilder = new StringBuilder();
-        
+
         if (relevantMemories.Any())
         {
             contextBuilder.AppendLine("Relevant context from your knowledge base:");
             contextBuilder.AppendLine();
-            
+
             foreach (var (memory, similarity) in relevantMemories)
             {
                 contextBuilder.AppendLine($"**{memory.Title ?? "Memory"}** (Relevance: {similarity:P1})");
                 contextBuilder.AppendLine(memory.Content);
                 contextBuilder.AppendLine();
             }
-            
+
             contextBuilder.AppendLine("---");
             contextBuilder.AppendLine();
         }
@@ -132,14 +137,15 @@ public class CompletionPipelineService : ICompletionPipelineService
 
         // Step 5: Stream LLM Response
         _logger.LogDebug("Step 5: Generating streaming response");
-        
+
         var hasError = false;
         await foreach (var chunk in _openAIService.GenerateStreamingCompletionAsync(
             finalPrompt,
-            request.Configuration?.Model,
-            request.Configuration?.Temperature,
-            request.Configuration?.MaxTokens,
-            cancellationToken))
+            model: request.Configuration?.Model,
+            temperature: request.Configuration?.Temperature,
+            maxTokens: request.Configuration?.MaxTokens,
+            systemPrompt: OpenAISystemPrompts.FinalResponse,
+            cancellationToken: cancellationToken))
         {
             yield return chunk;
         }

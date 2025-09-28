@@ -20,7 +20,7 @@ builder.Services.AddControllers();
 builder.Services.AddSingleton<NpgsqlDataSource>(serviceProvider =>
 {
     var configuration = serviceProvider.GetRequiredService<IConfiguration>();
-    var connString = configuration.GetConnectionString("DefaultConnection");
+    var connString = ResolveConnectionString(configuration);
     
     var dsb = new NpgsqlDataSourceBuilder(connString);
     dsb.EnableDynamicJson();
@@ -262,9 +262,175 @@ if (app.Environment.IsDevelopment())
     }
     catch (Exception ex)
     {
-        app.Logger.LogError(ex, "Failed to connect to database or create tables");
+        var safeConnectionInfo = TryGetSafeConnectionInfo(context);
+        if (!string.IsNullOrEmpty(safeConnectionInfo))
+        {
+            app.Logger.LogError(ex, "Failed to connect to database or create tables (Connection: {ConnectionInfo})", safeConnectionInfo);
+        }
+        else
+        {
+            app.Logger.LogError(ex, "Failed to connect to database or create tables");
+        }
     }
 }
 
 await app.RunAsync();
+
+
+static string ResolveConnectionString(IConfiguration configuration)
+{
+    var connectionString = configuration.GetConnectionString("DefaultConnection");
+
+    if (!string.IsNullOrWhiteSpace(connectionString) &&
+        !IsPlaceholder(connectionString))
+    {
+        return IsLikelyDatabaseUrl(connectionString)
+            ? BuildConnectionStringFromDatabaseUrl(connectionString)
+            : connectionString;
+    }
+
+    foreach (var candidate in GetConnectionStringCandidates(configuration))
+    {
+        if (string.IsNullOrWhiteSpace(candidate) || IsPlaceholder(candidate))
+        {
+            continue;
+        }
+
+        if (IsLikelyDatabaseUrl(candidate))
+        {
+            return BuildConnectionStringFromDatabaseUrl(candidate);
+        }
+
+        if (candidate.Contains('='))
+        {
+            return candidate;
+        }
+    }
+
+    throw new InvalidOperationException(
+        "A PostgreSQL connection string was not provided. Set 'ConnectionStrings:DefaultConnection', 'DATABASE_URL', or 'SUPABASE_CONNECTION_STRING'.");
+}
+
+static IEnumerable<string?> GetConnectionStringCandidates(IConfiguration configuration)
+{
+    yield return configuration["Supabase:ConnectionString"];
+    yield return configuration["SUPABASE_CONNECTION_STRING"];
+    yield return configuration["Supabase:DatabaseUrl"];
+    yield return configuration["DATABASE_URL"];
+    yield return configuration["SUPABASE_DATABASE_URL"];
+    yield return Environment.GetEnvironmentVariable("SUPABASE_CONNECTION_STRING");
+    yield return Environment.GetEnvironmentVariable("SUPABASE_DATABASE_URL");
+    yield return Environment.GetEnvironmentVariable("DATABASE_URL");
+}
+
+static bool IsPlaceholder(string? value) =>
+    !string.IsNullOrWhiteSpace(value) &&
+    value.Contains("YOUR_POSTGRES_CONNECTION_STRING", StringComparison.OrdinalIgnoreCase);
+
+static bool IsLikelyDatabaseUrl(string value) =>
+    value.StartsWith("postgres://", StringComparison.OrdinalIgnoreCase) ||
+    value.StartsWith("postgresql://", StringComparison.OrdinalIgnoreCase);
+
+static string? TryGetSafeConnectionInfo(MemoryDbContext context)
+{
+    try
+    {
+        var raw = context.Database.GetConnectionString();
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return null;
+        }
+
+        var effective = IsLikelyDatabaseUrl(raw) ? BuildConnectionStringFromDatabaseUrl(raw) : raw;
+        var builder = new NpgsqlConnectionStringBuilder(effective);
+
+        if (!string.IsNullOrWhiteSpace(builder.Password))
+        {
+            builder.Password = "*****";
+        }
+
+        if (!string.IsNullOrWhiteSpace(builder.Username))
+        {
+            builder.Username = "*****";
+        }
+
+        return $"Host={builder.Host};Port={builder.Port};Database={builder.Database};SslMode={builder.SslMode};TrustServerCertificate={builder.TrustServerCertificate}";
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+static string BuildConnectionStringFromDatabaseUrl(string databaseUrl)
+{
+    if (string.IsNullOrWhiteSpace(databaseUrl))
+    {
+        throw new InvalidOperationException("DATABASE_URL is empty.");
+    }
+
+    if (!Uri.TryCreate(databaseUrl, UriKind.Absolute, out var uri))
+    {
+        throw new InvalidOperationException($"DATABASE_URL '{databaseUrl}' is not a valid absolute URI.");
+    }
+
+    if (!uri.Scheme.Equals("postgres", StringComparison.OrdinalIgnoreCase) &&
+        !uri.Scheme.Equals("postgresql", StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException("DATABASE_URL must start with 'postgres://' or 'postgresql://'.");
+    }
+
+    var userInfoParts = uri.UserInfo.Split(':', 2);
+    if (userInfoParts.Length == 0 || string.IsNullOrWhiteSpace(userInfoParts[0]))
+    {
+        throw new InvalidOperationException("DATABASE_URL must include a username.");
+    }
+
+    var builder = new NpgsqlConnectionStringBuilder
+    {
+        Host = uri.Host,
+        Port = uri.IsDefaultPort ? 5432 : uri.Port,
+        Database = uri.AbsolutePath.Trim('/'),
+        Username = Uri.UnescapeDataString(userInfoParts[0]),
+        SslMode = SslMode.Require,
+    };
+
+    if (userInfoParts.Length == 2)
+    {
+        builder.Password = Uri.UnescapeDataString(userInfoParts[1]);
+    }
+
+    if (string.IsNullOrWhiteSpace(builder.Database))
+    {
+        throw new InvalidOperationException("DATABASE_URL must specify a database name.");
+    }
+
+    var query = uri.Query.TrimStart('?');
+    if (!string.IsNullOrWhiteSpace(query))
+    {
+        foreach (var pair in query.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = pair.Split('=', 2);
+            var key = Uri.UnescapeDataString(kv[0]);
+            var value = kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : string.Empty;
+
+            if (key.Equals("sslmode", StringComparison.OrdinalIgnoreCase))
+            {
+                if (Enum.TryParse<SslMode>(value, true, out var sslMode))
+                {
+                    builder.SslMode = sslMode;
+                }
+
+                continue;
+            }
+
+            builder[key] = value;
+        }
+    }
+
+    return builder.ConnectionString;
+}
+
+
+
 

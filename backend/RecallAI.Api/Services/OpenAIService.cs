@@ -1,13 +1,18 @@
+﻿using System.Collections.Generic;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+using System.Threading;
 using RecallAI.Api.Interfaces;
 using RecallAI.Api.Models.Configuration;
 using Microsoft.Extensions.Options;
-using System.Text;
-using System.Text.Json;
 
 namespace RecallAI.Api.Services;
 
 public class OpenAIService : IOpenAIService
 {
+    private static readonly Uri ResponsesEndpoint = new("https://api.openai.com/v1/responses");
+
     private readonly HttpClient _httpClient;
     private readonly OpenAIConfiguration _openAIConfig;
     private readonly ILogger<OpenAIService> _logger;
@@ -17,68 +22,72 @@ public class OpenAIService : IOpenAIService
         _httpClient = httpClient;
         _openAIConfig = openAIOptions.Value;
         _logger = logger;
-        
-        // Configure HttpClient for OpenAI
-        var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY") 
+
+        var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY")
                     ?? _openAIConfig.ApiKey;
-        
+
         if (string.IsNullOrEmpty(apiKey))
         {
             throw new InvalidOperationException("OpenAI API key is not configured. Please set OPENAI_API_KEY environment variable or OpenAI:ApiKey in appsettings.json");
         }
-        
-        _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
-        _httpClient.DefaultRequestHeaders.Add("User-Agent", "RecallAI/1.0");
+
+        if (!_httpClient.DefaultRequestHeaders.Contains("Authorization"))
+        {
+            _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {apiKey}");
+        }
+
+        if (!_httpClient.DefaultRequestHeaders.Contains("User-Agent"))
+        {
+            _httpClient.DefaultRequestHeaders.Add("User-Agent", "RecallAI/1.0");
+        }
+
         _httpClient.Timeout = TimeSpan.FromSeconds(_openAIConfig.TimeoutSeconds);
     }
 
     public async Task<string> EvaluateMemoryAsync(string memoryContent, string evaluationCriteria)
     {
         var model = _openAIConfig.Models.MemoryEvaluation;
-        
-        var prompt = $"Evaluate the following memory content based on the given criteria:\n\nMemory Content:\n{memoryContent}\n\nEvaluation Criteria:\n{evaluationCriteria}\n\nProvide a detailed evaluation:";
-        
-        return await GenerateCompletionAsync(model, prompt, "memory evaluation");
+
+        var userPrompt = $"User Input:\n{memoryContent}\n\nEvaluation Criteria:\n{evaluationCriteria}\n\nDecide if this input should be stored as a memory and explain your reasoning.";
+
+        return await GenerateResponseAsync(model, OpenAISystemPrompts.MemoryEvaluation, userPrompt, "memory evaluation");
     }
 
     public async Task<string> GenerateHyDEAsync(string query)
     {
         var model = _openAIConfig.Models.HyDE;
-        
-        var prompt = $"Generate a hypothetical document that would answer the following query. The document should be detailed and informative:\n\nQuery: {query}\n\nHypothetical Document:";
-        
-        return await GenerateCompletionAsync(model, prompt, "HyDE generation");
+
+        var userPrompt = $"Query: {query}\n\nCreate the hypothetical document:";
+
+        return await GenerateResponseAsync(model, OpenAISystemPrompts.HyDE, userPrompt, "HyDE generation");
     }
 
     public async Task<string> GenerateFinalResultAsync(string prompt, string context)
     {
         var model = _openAIConfig.Models.FinalResult;
-        
-        var fullPrompt = $"Context:\n{context}\n\nUser Request:\n{prompt}\n\nProvide a comprehensive and accurate response:";
-        
-        return await GenerateCompletionAsync(model, fullPrompt, "final result generation");
+
+        var userPrompt = $"Context:\n{context}\n\nUser Request:\n{prompt}";
+
+        return await GenerateResponseAsync(model, OpenAISystemPrompts.FinalResponse, userPrompt, "final result generation");
     }
 
-    private async Task<string> GenerateCompletionAsync(string model, string prompt, string operationType)
+    private async Task<string> GenerateResponseAsync(string model, string systemPrompt, string userPrompt, string operationType)
     {
         try
         {
-            var requestBody = new
+            var requestPayload = new Dictionary<string, object?>
             {
-                model = model,
-                messages = new[]
-                {
-                    new { role = "user", content = prompt }
-                },
-                max_tokens = 2000,
-                temperature = 0.7
+                ["model"] = model,
+                ["input"] = OpenAIResponseHelpers.BuildMessages(systemPrompt, userPrompt),
+                ["temperature"] = 0.7,
+                ["max_output_tokens"] = 2000
             };
 
-            var json = JsonSerializer.Serialize(requestBody);
-            var content = new StringContent(json, Encoding.UTF8, "application/json");
+            var json = JsonSerializer.Serialize(requestPayload, OpenAIResponseHelpers.RequestSerializerOptions);
+            using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("https://api.openai.com/v1/chat/completions", content);
-            
+            using var response = await _httpClient.PostAsync(ResponsesEndpoint, content);
+
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
@@ -87,16 +96,12 @@ public class OpenAIService : IOpenAIService
 
             var responseJson = await response.Content.ReadAsStringAsync();
             var responseData = JsonSerializer.Deserialize<JsonElement>(responseJson);
-            
-            var messageContent = responseData
-                .GetProperty("choices")[0]
-                .GetProperty("message")
-                .GetProperty("content")
-                .GetString();
+
+            var messageContent = OpenAIResponseHelpers.ExtractTextContent(responseData);
 
             _logger.LogDebug("Generated {OperationType} using model {Model}", operationType, model);
-            
-            return messageContent ?? string.Empty;
+
+            return messageContent;
         }
         catch (Exception ex)
         {
@@ -106,32 +111,31 @@ public class OpenAIService : IOpenAIService
     }
 
     public async IAsyncEnumerable<string> GenerateStreamingCompletionAsync(
-        string prompt, 
-        string? model = null, 
-        double? temperature = null, 
-        int? maxTokens = null, 
+        string prompt,
+        string? model = null,
+        double? temperature = null,
+        int? maxTokens = null,
+        string? systemPrompt = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         var selectedModel = model ?? _openAIConfig.Models.FinalResult;
         var selectedTemperature = temperature ?? 0.7;
         var selectedMaxTokens = maxTokens ?? 2000;
+        var effectiveSystemPrompt = systemPrompt ?? OpenAISystemPrompts.FinalResponse;
 
-        var requestBody = new
+        var requestPayload = new Dictionary<string, object?>
         {
-            model = selectedModel,
-            messages = new[]
-            {
-                new { role = "user", content = prompt }
-            },
-            max_tokens = selectedMaxTokens,
-            temperature = selectedTemperature,
-            stream = true
+            ["model"] = selectedModel,
+            ["input"] = OpenAIResponseHelpers.BuildMessages(effectiveSystemPrompt, prompt),
+            ["temperature"] = selectedTemperature,
+            ["max_output_tokens"] = selectedMaxTokens,
+            ["stream"] = true
         };
 
-        var json = JsonSerializer.Serialize(requestBody);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        var json = JsonSerializer.Serialize(requestPayload, OpenAIResponseHelpers.RequestSerializerOptions);
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-        var request = new HttpRequestMessage(HttpMethod.Post, "https://api.openai.com/v1/chat/completions")
+        using var request = new HttpRequestMessage(HttpMethod.Post, ResponsesEndpoint)
         {
             Content = content
         };
@@ -151,6 +155,7 @@ public class OpenAIService : IOpenAIService
         {
             var errorContent = await response.Content.ReadAsStringAsync();
             _logger.LogError("OpenAI API request failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+            response.Dispose();
             yield break;
         }
 
@@ -161,13 +166,22 @@ public class OpenAIService : IOpenAIService
             string? line;
             while ((line = await reader.ReadLineAsync()) != null && !cancellationToken.IsCancellationRequested)
             {
-                if (string.IsNullOrWhiteSpace(line) || !line.StartsWith("data: "))
+                if (string.IsNullOrWhiteSpace(line))
+                {
                     continue;
+                }
 
-                var data = line.Substring(6); // Remove "data: " prefix
-                
-                if (data == "[DONE]")
+                if (!line.StartsWith("data:", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var data = line[5..].Trim();
+
+                if (string.Equals(data, "[DONE]", StringComparison.OrdinalIgnoreCase))
+                {
                     break;
+                }
 
                 JsonElement jsonData;
                 try
@@ -179,23 +193,54 @@ public class OpenAIService : IOpenAIService
                     _logger.LogWarning(ex, "Failed to parse streaming response chunk: {Data}", data);
                     continue;
                 }
-                
-                if (jsonData.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+
+                if (jsonData.ValueKind == JsonValueKind.Object && jsonData.TryGetProperty("type", out var typeProperty))
                 {
-                    var choice = choices[0];
-                    if (choice.TryGetProperty("delta", out var delta) &&
-                        delta.TryGetProperty("content", out var contentProperty))
+                    var typeValue = typeProperty.GetString();
+
+                    if (string.Equals(typeValue, "response.error", StringComparison.OrdinalIgnoreCase))
                     {
-                        var contentChunk = contentProperty.GetString();
-                        if (!string.IsNullOrEmpty(contentChunk))
-                        {
-                            yield return contentChunk;
-                        }
+                        var errorText = ExtractStreamingError(jsonData);
+                        _logger.LogError("Received error from streaming response: {Error}", errorText);
+                        continue;
                     }
+
+                    if (string.Equals(typeValue, "response.completed", StringComparison.OrdinalIgnoreCase))
+                    {
+                        break;
+                    }
+                }
+
+                if (OpenAIResponseHelpers.TryExtractStreamDelta(jsonData, out var delta) && !string.IsNullOrEmpty(delta))
+                {
+                    yield return delta;
                 }
             }
         }
 
         _logger.LogDebug("Completed streaming completion using model {Model}", selectedModel);
+    }
+
+    private static string ExtractStreamingError(JsonElement element)
+    {
+        if (element.ValueKind == JsonValueKind.Object && element.TryGetProperty("error", out var errorElement))
+        {
+            if (errorElement.ValueKind == JsonValueKind.Object &&
+                errorElement.TryGetProperty("message", out var messageElement) &&
+                messageElement.ValueKind == JsonValueKind.String)
+            {
+                return messageElement.GetString() ?? "Unknown streaming error.";
+            }
+
+            var fallback = OpenAIResponseHelpers.ExtractTextContent(errorElement);
+            if (!string.IsNullOrEmpty(fallback))
+            {
+                return fallback;
+            }
+
+            return errorElement.ToString();
+        }
+
+        return "Unknown streaming error.";
     }
 }
