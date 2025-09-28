@@ -3,6 +3,7 @@ using RecallAI.Api.Models.Configuration;
 using Microsoft.Extensions.Options;
 using System.Text;
 using System.Text.Json;
+using System.Net;
 
 namespace RecallAI.Api.Services;
 
@@ -82,7 +83,8 @@ public class OpenAIService : IOpenAIService
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync();
-                throw new HttpRequestException($"OpenAI API request failed for {operationType} with status {response.StatusCode}: {errorContent}");
+                string userFriendlyMessage = GetUserFriendlyErrorMessage(response.StatusCode, errorContent);
+                throw new HttpRequestException($"{userFriendlyMessage}|ORIGINAL:{errorContent}");
             }
 
             var responseJson = await response.Content.ReadAsStringAsync();
@@ -150,7 +152,12 @@ public class OpenAIService : IOpenAIService
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync();
+            
+            // Parse OpenAI error response for better error messages
+            string userFriendlyMessage = GetUserFriendlyErrorMessage(response.StatusCode, errorContent);
+            
             _logger.LogError("OpenAI API request failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
+            yield return $"\n\n❌ **{userFriendlyMessage}**";
             yield break;
         }
 
@@ -197,5 +204,53 @@ public class OpenAIService : IOpenAIService
         }
 
         _logger.LogDebug("Completed streaming completion using model {Model}", selectedModel);
+    }
+    
+    private string GetUserFriendlyErrorMessage(HttpStatusCode statusCode, string errorContent)
+    {
+        try
+        {
+            var errorData = JsonSerializer.Deserialize<JsonElement>(errorContent);
+            
+            if (errorData.TryGetProperty("error", out var errorElement))
+            {
+                var errorType = errorElement.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : "";
+                var errorMessage = errorElement.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : "";
+                var errorCode = errorElement.TryGetProperty("code", out var codeElement) ? codeElement.GetString() : "";
+                
+                return (statusCode, errorType, errorCode) switch
+                {
+                    (HttpStatusCode.TooManyRequests, _, _) => 
+                        "⏳ **Rate limit exceeded.** Please wait a moment and try again.",
+                    
+                    (HttpStatusCode.Unauthorized, _, _) => 
+                        "🔑 **API key issue.** Please check your OpenAI API key configuration.",
+                    
+                    (HttpStatusCode.PaymentRequired, _, _) or (_, "insufficient_quota", _) => 
+                        "💳 **Quota exceeded.** Your OpenAI API quota has been reached. Please check your billing at platform.openai.com.",
+                    
+                    (HttpStatusCode.BadRequest, "invalid_request_error", _) => 
+                        $"❌ **Invalid request:** {errorMessage}",
+                    
+                    (HttpStatusCode.InternalServerError, _, _) => 
+                        "🔧 **OpenAI service issue.** The OpenAI API is experiencing issues. Please try again later.",
+                    
+                    _ => $"⚠️ **API Error ({statusCode}):** {errorMessage ?? "Unknown error occurred"}"
+                };
+            }
+        }
+        catch (JsonException)
+        {
+            // If we can't parse the error, provide a generic message
+        }
+        
+        return statusCode switch
+        {
+            HttpStatusCode.TooManyRequests => "⏳ **Rate limit exceeded.** Please wait and try again.",
+            HttpStatusCode.Unauthorized => "🔑 **Authentication failed.** Please check your API key.",
+            HttpStatusCode.PaymentRequired => "💳 **Quota exceeded.** Please check your OpenAI billing.",
+            HttpStatusCode.InternalServerError => "🔧 **Service unavailable.** Please try again later.",
+            _ => $"⚠️ **Error ({statusCode}).** Please try again or contact support."
+        };
     }
 }

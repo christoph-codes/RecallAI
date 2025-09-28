@@ -13,7 +13,7 @@ export type HealthCheckResponse = {
  * Configuration for the API client
  */
 const API_CONFIG = {
-  BASE_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5095",
+  BASE_URL: process.env.NEXT_PUBLIC_API_URL,
   ENDPOINTS: {
     HEALTH: "/api/health",
   },
