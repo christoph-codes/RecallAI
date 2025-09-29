@@ -89,19 +89,32 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
   {
       // Prevent automatic claim type mapping (e.g., "sub" to nameidentifier)
       options.MapInboundClaims = false;
+      
+      // Allow HTTP metadata for local development
+      options.RequireHttpsMetadata = false;
+
+      // Get the JWT secret from configuration
+      var jwtSecret = builder.Configuration["Supabase:JwtSecret"];
+      if (string.IsNullOrEmpty(jwtSecret))
+      {
+          throw new InvalidOperationException("Supabase:JwtSecret configuration is missing or empty!");
+      }
+      
+      Console.WriteLine($"JWT Secret loaded: {jwtSecret.Substring(0, 20)}...");
 
       options.TokenValidationParameters = new TokenValidationParameters
       {
+          // Use symmetric key validation with Supabase JWT secret
           IssuerSigningKey = new SymmetricSecurityKey(
-          Encoding.UTF8.GetBytes(builder.Configuration["Supabase:JwtSecret"]!)),
+              Encoding.UTF8.GetBytes(jwtSecret)), // Use UTF8 encoding, not Base64
           ValidIssuer = "https://oejmcrnsmkjlugnkbxbu.supabase.co/auth/v1",
           ValidAudience = "authenticated",
           ValidateIssuer = true,
           ValidateAudience = true,
           ValidateIssuerSigningKey = true,
           ValidateLifetime = true,
-          ClockSkew = TimeSpan.FromMinutes(2),
-
+          ClockSkew = TimeSpan.FromMinutes(5), // More lenient clock skew
+          
           // Tell ASP.NET which claim represents the user id (we want *raw* "sub")
           NameClaimType = "sub"
       };
@@ -110,8 +123,18 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
       {
           OnAuthenticationFailed = ctx =>
           {
-              ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
-                 .CreateLogger("JWT").LogError(ctx.Exception, "JWT validation failed");
+              var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                 .CreateLogger("JWT");
+              logger.LogError(ctx.Exception, "JWT validation failed. Token: {Token}", 
+                  ctx.Request.Headers["Authorization"].FirstOrDefault()?.Replace("Bearer ", "")?.Substring(0, 20) + "...");
+              return Task.CompletedTask;
+          },
+          OnTokenValidated = ctx =>
+          {
+              var logger = ctx.HttpContext.RequestServices.GetRequiredService<ILoggerFactory>()
+                 .CreateLogger("JWT");
+              var userId = ctx.Principal?.FindFirst("sub")?.Value;
+              logger.LogInformation("JWT token validated successfully for user: {UserId}", userId);
               return Task.CompletedTask;
           }
       };
@@ -250,7 +273,7 @@ if (!string.IsNullOrEmpty(port))
     app.Urls.Add($"http://0.0.0.0:{port}");
 }
 
-// Ensure database is created (for development)
+// Ensure database is created (for development) - Don't block startup
 if (app.Environment.IsDevelopment())
 {
     using var scope = app.Services.CreateScope();

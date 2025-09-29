@@ -15,7 +15,6 @@ interface UseCurrentUserReturn {
 
 const useCurrentUser = (): UseCurrentUserReturn => {
   const [user, setUser] = useState<User | null>(null);
-  console.log("user", user);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -75,8 +74,6 @@ const useCurrentUser = (): UseCurrentUserReturn => {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log("Auth state changed:", event, session?.user?.id);
-
       setUser(session?.user ?? null);
       setSession(session);
       setLoading(false);

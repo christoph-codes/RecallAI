@@ -29,7 +29,7 @@ export type MemoryResponse = {
  * Configuration for the Memory API client
  */
 const API_CONFIG = {
-  BASE_URL: process.env.NEXT_PUBLIC_API_URL || "http://localhost:5095",
+  BASE_URL: process.env.NEXT_PUBLIC_API_URL,
   ENDPOINTS: {
     MEMORIES: "/api/memory",
   },

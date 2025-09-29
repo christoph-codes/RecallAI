@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using RecallAI.Api.Interfaces;
+using System.ComponentModel.DataAnnotations;
 
 namespace RecallAI.Api.Controllers;
 
@@ -26,6 +27,12 @@ public class OpenAIController : ControllerBase
     [HttpPost("evaluate-memory")]
     public async Task<IActionResult> EvaluateMemory([FromBody] EvaluateMemoryRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.MemoryContent))
+            return BadRequest(new { error = "Memory content is required" });
+            
+        if (string.IsNullOrWhiteSpace(request.EvaluationCriteria))
+            return BadRequest(new { error = "Evaluation criteria is required" });
+
         try
         {
             var evaluation = await _openAIService.EvaluateMemoryAsync(request.MemoryContent, request.EvaluationCriteria);
@@ -41,6 +48,9 @@ public class OpenAIController : ControllerBase
     [HttpPost("generate-hyde")]
     public async Task<IActionResult> GenerateHyDE([FromBody] GenerateHyDERequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Query))
+            return BadRequest(new { error = "Query is required" });
+
         try
         {
             var hypotheticalDocument = await _openAIService.GenerateHyDEAsync(request.Query);
@@ -56,6 +66,12 @@ public class OpenAIController : ControllerBase
     [HttpPost("generate-final-result")]
     public async Task<IActionResult> GenerateFinalResult([FromBody] GenerateFinalResultRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Prompt))
+            return BadRequest(new { error = "Prompt is required" });
+            
+        if (string.IsNullOrWhiteSpace(request.Context))
+            return BadRequest(new { error = "Context is required" });
+
         try
         {
             var result = await _openAIService.GenerateFinalResultAsync(request.Prompt, request.Context);
@@ -71,6 +87,9 @@ public class OpenAIController : ControllerBase
     [HttpPost("generate-embedding")]
     public async Task<IActionResult> GenerateEmbedding([FromBody] GenerateEmbeddingRequest request)
     {
+        if (string.IsNullOrWhiteSpace(request.Text))
+            return BadRequest(new { error = "Text is required" });
+
         try
         {
             var embedding = await _embeddingService.GenerateEmbeddingAsync(request.Text);
@@ -84,7 +103,16 @@ public class OpenAIController : ControllerBase
     }
 }
 
-public record EvaluateMemoryRequest(string MemoryContent, string EvaluationCriteria);
-public record GenerateHyDERequest(string Query);
-public record GenerateFinalResultRequest(string Prompt, string Context);
-public record GenerateEmbeddingRequest(string Text);
+public record EvaluateMemoryRequest(
+    [Required] string MemoryContent, 
+    [Required] string EvaluationCriteria);
+
+public record GenerateHyDERequest(
+    [Required] string Query);
+
+public record GenerateFinalResultRequest(
+    [Required] string Prompt, 
+    [Required] string Context);
+
+public record GenerateEmbeddingRequest(
+    [Required] string Text);
