@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using RecallAI.Api.Models.Configuration;
 using RecallAI.Api.Extensions;
 using RecallAI.Api.Interfaces;
 using RecallAI.Api.Models;
@@ -18,12 +20,22 @@ public class MemoryController : ControllerBase
 {
     private readonly IMemoryRepository _memoryRepository;
     private readonly IEmbeddingService _embeddingService;
+    private readonly IHydeService _hydeService;
+    private readonly HydeConfiguration _hydeConfig;
+
     private readonly ILogger<MemoryController> _logger;
 
-    public MemoryController(IMemoryRepository memoryRepository, IEmbeddingService embeddingService, ILogger<MemoryController> logger)
+    public MemoryController(
+        IMemoryRepository memoryRepository,
+        IEmbeddingService embeddingService,
+        IHydeService hydeService,
+        IOptions<HydeConfiguration> hydeOptions,
+        ILogger<MemoryController> logger)
     {
         _memoryRepository = memoryRepository;
         _embeddingService = embeddingService;
+        _hydeService = hydeService;
+        _hydeConfig = hydeOptions.Value;
         _logger = logger;
     }
 
@@ -266,7 +278,8 @@ public class MemoryController : ControllerBase
     public async Task<ActionResult<SearchResponse>> SearchMemories(
         [FromQuery, Required] string query,
         [FromQuery] int limit = 10,
-        [FromQuery] double threshold = 0.7)
+        [FromQuery] double threshold = 0.7,
+        [FromQuery] bool useHyde = false)
     {
         // Validate query parameters
         if (string.IsNullOrWhiteSpace(query))
@@ -286,54 +299,165 @@ public class MemoryController : ControllerBase
         try
         {
             var userId = Guid.Parse(HttpContext.GetCurrentUserIdOrThrow());
+            var hydeRequested = useHyde && _hydeConfig.Enabled;
+            const double QueryWeight = 0.4;
+            const double HydeWeight = 0.6;
 
-            // Generate embedding for search query
+            var queryEmbeddingTask = _embeddingService.GenerateEmbeddingAsync(query);
+            Task<string>? hydeDocumentTask = null;
+            if (hydeRequested)
+            {
+                hydeDocumentTask = _hydeService.GenerateHypotheticalAsync(query);
+            }
+
             float[] queryEmbedding;
             try
             {
-                queryEmbedding = await _embeddingService.GenerateEmbeddingAsync(query);
+                queryEmbedding = await queryEmbeddingTask;
             }
             catch (HttpRequestException ex)
             {
+                stopwatch.Stop();
                 _logger.LogError(ex, "Failed to generate embedding for search query");
                 return StatusCode(503, new { Message = "Search service temporarily unavailable" });
             }
             catch (Exception ex)
             {
+                stopwatch.Stop();
                 _logger.LogError(ex, "Error generating embedding for search query");
                 return StatusCode(500, new { Message = "An error occurred while processing the search query" });
             }
 
-            // Perform vector similarity search
-            var searchResults = await _memoryRepository.SearchSimilarAsync(userId, queryEmbedding, limit, threshold);
+            bool hydeUsed = false;
+            string? hypotheticalDocument = null;
+            List<SearchResultItem> items;
 
-            stopwatch.Stop();
-
-            // Map to response model
-            var response = new SearchResponse
+            if (hydeRequested && hydeDocumentTask != null)
             {
-                Query = query,
-                ResultCount = searchResults.Count,
-                ExecutionTimeMs = (int)stopwatch.ElapsedMilliseconds,
-                Results = searchResults.Select(result => new SearchResultItem
+                try
+                {
+                    hypotheticalDocument = await hydeDocumentTask;
+                }
+                catch (InvalidOperationException ex)
+                {
+                    _logger.LogWarning(ex, "HyDE is disabled or unavailable. Falling back to query search for user {UserId}", userId);
+                    hydeRequested = false;
+                }
+                catch (HttpRequestException ex)
+                {
+                    _logger.LogWarning(ex, "HyDE generation failed for query '{Query}'. Falling back to query search.", query);
+                    hydeRequested = false;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Unexpected error generating HyDE document for query '{Query}'. Falling back to query search.", query);
+                    hydeRequested = false;
+                }
+            }
+
+            if (hydeRequested && !string.IsNullOrWhiteSpace(hypotheticalDocument))
+            {
+                float[] hydeEmbedding;
+                try
+                {
+                    hydeEmbedding = await _hydeService.GetHydeEmbeddingAsync(query);
+                }
+                catch (HttpRequestException ex)
+                {
+                    stopwatch.Stop();
+                    _logger.LogError(ex, "Failed to generate HyDE embedding for query '{Query}'", query);
+                    return StatusCode(503, new { Message = "Search service temporarily unavailable" });
+                }
+                catch (Exception ex)
+                {
+                    stopwatch.Stop();
+                    _logger.LogError(ex, "Error generating HyDE embedding for query '{Query}'", query);
+                    return StatusCode(500, new { Message = "An error occurred while processing the HyDE search" });
+                }
+
+                var hybridResults = await _memoryRepository.HybridSearchAsync(userId, queryEmbedding, hydeEmbedding, limit, threshold);
+
+                hydeUsed = true;
+
+                items = hybridResults
+                    .Select(result =>
+                    {
+                        var queryScore = result.queryScore;
+                        var hydeScore = result.hydeScore;
+                        var hasQueryScore = queryScore > 0;
+                        var hasHydeScore = hydeScore > 0;
+
+                        var weightedScore = hasQueryScore && hasHydeScore
+                            ? (queryScore * QueryWeight) + (hydeScore * HydeWeight)
+                            : (hasHydeScore ? hydeScore : queryScore);
+
+                        var bestInputScore = hasQueryScore && hasHydeScore
+                            ? Math.Max(queryScore, hydeScore)
+                            : (hasHydeScore ? hydeScore : queryScore);
+
+                        var combinedScore = hasQueryScore && hasHydeScore
+                            ? Math.Max(weightedScore, bestInputScore)
+                            : weightedScore;
+
+                        var method = hasQueryScore && hasHydeScore
+                            ? "combined"
+                            : hasHydeScore ? "hyde" : "query";
+
+                        return new SearchResultItem
+                        {
+                            Id = result.memory.Id,
+                            Title = result.memory.Title,
+                            Content = result.memory.Content,
+                            ContentType = result.memory.ContentType,
+                            SimilarityScore = Math.Round(bestInputScore, 4),
+                            CombinedScore = Math.Round(combinedScore, 4),
+                            SearchMethod = method,
+                            CreatedAt = result.memory.CreatedAt,
+                            Metadata = result.memory.Metadata
+                        };
+                    })
+                    .OrderByDescending(item => item.CombinedScore)
+                    .Take(limit)
+                    .ToList();
+            }
+            else
+            {
+                var searchResults = await _memoryRepository.SearchSimilarAsync(userId, queryEmbedding, limit, threshold);
+
+                items = searchResults.Select(result => new SearchResultItem
                 {
                     Id = result.memory.Id,
                     Title = result.memory.Title,
                     Content = result.memory.Content,
                     ContentType = result.memory.ContentType,
-                    SimilarityScore = Math.Round(result.similarity, 4), // Round to 4 decimal places
+                    SimilarityScore = Math.Round(result.similarity, 4),
+                    CombinedScore = Math.Round(result.similarity, 4),
+                    SearchMethod = "query",
                     CreatedAt = result.memory.CreatedAt,
                     Metadata = result.memory.Metadata
-                }).ToList()
+                }).ToList();
+            }
+
+            stopwatch.Stop();
+
+            var response = new SearchResponse
+            {
+                Query = query,
+                ResultCount = items.Count,
+                ExecutionTimeMs = (int)stopwatch.ElapsedMilliseconds,
+                Results = items,
+                HydeUsed = hydeUsed,
+                HypotheticalDocument = hydeUsed ? hypotheticalDocument : null
             };
 
-            _logger.LogInformation("Search completed for user {UserId}: query='{Query}', results={ResultCount}, time={ExecutionTimeMs}ms",
-                userId, query, response.ResultCount, response.ExecutionTimeMs);
+            _logger.LogInformation("Search completed for user {UserId}: query='{Query}', results={ResultCount}, time={ExecutionTimeMs}ms, hydeUsed={HydeUsed}",
+                userId, query, response.ResultCount, response.ExecutionTimeMs, response.HydeUsed);
 
             return Ok(response);
         }
         catch (UnauthorizedAccessException)
         {
+            stopwatch.Stop();
             return Unauthorized(new { Message = "User authentication required" });
         }
         catch (Exception ex)
@@ -344,3 +468,6 @@ public class MemoryController : ControllerBase
         }
     }
 }
+
+
+

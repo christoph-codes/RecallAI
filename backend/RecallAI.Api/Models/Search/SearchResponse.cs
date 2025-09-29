@@ -9,4 +9,8 @@ public class SearchResponse
     public int ResultCount { get; set; }
     
     public int ExecutionTimeMs { get; set; }
+    
+    public bool HydeUsed { get; set; }
+    
+    public string? HypotheticalDocument { get; set; }
 }

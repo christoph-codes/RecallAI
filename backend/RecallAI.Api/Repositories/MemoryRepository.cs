@@ -141,6 +141,32 @@ public class MemoryRepository : IMemoryRepository
         return results;
     }
 
+    public async Task<List<(Memory memory, double queryScore, double hydeScore)>> HybridSearchAsync(Guid userId, float[] queryEmbedding, float[] hydeEmbedding, int limit, double threshold)
+    {
+        var combinedResults = new Dictionary<Guid, (Memory memory, double queryScore, double hydeScore)>();
+
+        var queryResults = await SearchSimilarAsync(userId, queryEmbedding, limit, threshold);
+        foreach (var (memory, similarity) in queryResults)
+        {
+            combinedResults[memory.Id] = (memory, similarity, 0d);
+        }
+
+        var hydeResults = await SearchSimilarAsync(userId, hydeEmbedding, limit, threshold);
+        foreach (var (memory, similarity) in hydeResults)
+        {
+            if (combinedResults.TryGetValue(memory.Id, out var existing))
+            {
+                combinedResults[memory.Id] = (existing.memory, existing.queryScore, Math.Max(existing.hydeScore, similarity));
+            }
+            else
+            {
+                combinedResults[memory.Id] = (memory, 0d, similarity);
+            }
+        }
+
+        return combinedResults.Values.ToList();
+    }
+
     public async Task<bool> HasEmbeddingAsync(Guid memoryId)
     {
         return await _context.MemoryEmbeddings
