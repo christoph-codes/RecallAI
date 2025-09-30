@@ -1,14 +1,12 @@
 ﻿using System.Collections.Generic;
+using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using Microsoft.Extensions.Options;
 using RecallAI.Api.Interfaces;
 using RecallAI.Api.Models.Configuration;
-using Microsoft.Extensions.Options;
-using System.Text;
-using System.Text.Json;
-using System.Net;
 
 namespace RecallAI.Api.Services;
 
@@ -209,7 +207,7 @@ public class OpenAIService : IOpenAIService
 
                     if (string.Equals(typeValue, "response.error", StringComparison.OrdinalIgnoreCase))
                     {
-                        var errorText = ExtractStreamingError(jsonData);
+                        var errorText = GetUserFriendlyErrorMessage(response.StatusCode, jsonData.ToString());
                         _logger.LogError("Received error from streaming response: {Error}", errorText);
                         continue;
                     }
