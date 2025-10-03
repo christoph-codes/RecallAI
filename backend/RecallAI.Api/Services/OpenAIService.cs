@@ -80,9 +80,14 @@ public class OpenAIService : IOpenAIService
             {
                 ["model"] = model,
                 ["input"] = OpenAIResponseHelpers.BuildMessages(systemPrompt, userPrompt),
-                ["temperature"] = 0.7,
                 ["max_output_tokens"] = 2000
             };
+
+            // Only include temperature for models that support it
+            if (SupportsTemperature(model))
+            {
+                requestPayload["temperature"] = 0.7;
+            }
 
             var json = JsonSerializer.Serialize(requestPayload, OpenAIResponseHelpers.RequestSerializerOptions);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -129,10 +134,15 @@ public class OpenAIService : IOpenAIService
         {
             ["model"] = selectedModel,
             ["input"] = OpenAIResponseHelpers.BuildMessages(effectiveSystemPrompt, prompt),
-            ["temperature"] = selectedTemperature,
             ["max_output_tokens"] = selectedMaxTokens,
             ["stream"] = true
         };
+
+        // Only include temperature for models that support it
+        if (SupportsTemperature(selectedModel))
+        {
+            requestPayload["temperature"] = selectedTemperature;
+        }
 
         var json = JsonSerializer.Serialize(requestPayload, OpenAIResponseHelpers.RequestSerializerOptions);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -156,10 +166,10 @@ public class OpenAIService : IOpenAIService
         if (!response.IsSuccessStatusCode)
         {
             var errorContent = await response.Content.ReadAsStringAsync();
-            
+
             // Parse OpenAI error response for better error messages
             string userFriendlyMessage = GetUserFriendlyErrorMessage(response.StatusCode, errorContent);
-            
+
             _logger.LogError("OpenAI API request failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
             response.Dispose();
             yield return $"\n\n❌ **{userFriendlyMessage}**";
@@ -227,36 +237,42 @@ public class OpenAIService : IOpenAIService
 
         _logger.LogDebug("Completed streaming completion using model {Model}", selectedModel);
     }
-    
+
+    private static bool SupportsTemperature(string model)
+    {
+        // OpenAI o1-preview and o1-mini models don't support temperature parameter
+        return !model.StartsWith("o1-", StringComparison.OrdinalIgnoreCase);
+    }
+
     private string GetUserFriendlyErrorMessage(HttpStatusCode statusCode, string errorContent)
     {
         try
         {
             var errorData = JsonSerializer.Deserialize<JsonElement>(errorContent);
-            
+
             if (errorData.TryGetProperty("error", out var errorElement))
             {
                 var errorType = errorElement.TryGetProperty("type", out var typeElement) ? typeElement.GetString() : "";
                 var errorMessage = errorElement.TryGetProperty("message", out var messageElement) ? messageElement.GetString() : "";
                 var errorCode = errorElement.TryGetProperty("code", out var codeElement) ? codeElement.GetString() : "";
-                
+
                 return (statusCode, errorType, errorCode) switch
                 {
-                    (HttpStatusCode.TooManyRequests, _, _) => 
+                    (HttpStatusCode.TooManyRequests, _, _) =>
                         "⏳ **Rate limit exceeded.** Please wait a moment and try again.",
-                    
-                    (HttpStatusCode.Unauthorized, _, _) => 
+
+                    (HttpStatusCode.Unauthorized, _, _) =>
                         "🔑 **API key issue.** Please check your OpenAI API key configuration.",
-                    
-                    (HttpStatusCode.PaymentRequired, _, _) or (_, "insufficient_quota", _) => 
+
+                    (HttpStatusCode.PaymentRequired, _, _) or (_, "insufficient_quota", _) =>
                         "💳 **Quota exceeded.** Your OpenAI API quota has been reached. Please check your billing at platform.openai.com.",
-                    
-                    (HttpStatusCode.BadRequest, "invalid_request_error", _) => 
+
+                    (HttpStatusCode.BadRequest, "invalid_request_error", _) =>
                         $"❌ **Invalid request:** {errorMessage}",
-                    
-                    (HttpStatusCode.InternalServerError, _, _) => 
+
+                    (HttpStatusCode.InternalServerError, _, _) =>
                         "🔧 **OpenAI service issue.** The OpenAI API is experiencing issues. Please try again later.",
-                    
+
                     _ => $"⚠️ **API Error ({statusCode}):** {errorMessage ?? "Unknown error occurred"}"
                 };
             }
@@ -265,7 +281,7 @@ public class OpenAIService : IOpenAIService
         {
             // If we can't parse the error, provide a generic message
         }
-        
+
         return statusCode switch
         {
             HttpStatusCode.TooManyRequests => "⏳ **Rate limit exceeded.** Please wait and try again.",
