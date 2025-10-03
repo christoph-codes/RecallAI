@@ -81,9 +81,14 @@ public class HydeService : IHydeService
             {
                 ["model"] = _hydeConfig.Model,
                 ["input"] = OpenAIResponseHelpers.BuildMessages(OpenAISystemPrompts.HyDE, userPrompt),
-                ["temperature"] = 0.7,
                 ["max_output_tokens"] = _hydeConfig.MaxTokens
             };
+
+            // Only include temperature for models that support it
+            if (SupportsTemperature(_hydeConfig.Model))
+            {
+                requestPayload["temperature"] = 0.7;
+            }
 
             var json = JsonSerializer.Serialize(requestPayload, OpenAIResponseHelpers.RequestSerializerOptions);
             using var content = new StringContent(json, Encoding.UTF8, "application/json");
@@ -159,5 +164,11 @@ public class HydeService : IHydeService
 
             _cache[key] = (document, DateTime.UtcNow);
         }
+    }
+
+    private static bool SupportsTemperature(string model)
+    {
+        // OpenAI o1-preview and o1-mini models don't support temperature parameter
+        return !model.StartsWith("o1-", StringComparison.OrdinalIgnoreCase);
     }
 }
