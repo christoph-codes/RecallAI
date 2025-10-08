@@ -11,7 +11,7 @@ public class OpenAIConfiguration
 public class OpenAIModelsConfiguration
 {
     public string Embeddings { get; set; } = "text-embedding-3-small";
-    public string MemoryEvaluation { get; set; } = "gpt-5-turbo";
-    public string HyDE { get; set; } = "gpt-5-turbo";
+    public string MemoryEvaluation { get; set; } = "gpt-5-nano";
+    public string HyDE { get; set; } = "gpt-5-nano";
     public string FinalResult { get; set; } = "gpt-5";
 }

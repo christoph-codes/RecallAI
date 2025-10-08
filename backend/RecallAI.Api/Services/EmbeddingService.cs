@@ -1,4 +1,5 @@
 using RecallAI.Api.Interfaces;
+using System.Diagnostics;
 using RecallAI.Api.Models.Configuration;
 using Microsoft.Extensions.Options;
 using System.Collections.Concurrent;
@@ -142,7 +143,15 @@ public class EmbeddingService : IEmbeddingService
     private async Task<float[]> GenerateEmbeddingFromApiAsync(string text)
     {
         var model = _openAIConfig.Models.Embeddings;
-        
+
+        _logger.LogInformation(
+            "Requesting embedding from OpenAI with model {Model}. TextLength={TextLength}. TextPreview={TextPreview}",
+            model,
+            text.Length,
+            TruncateForLog(text));
+
+        var stopwatch = Stopwatch.StartNew();
+
         var requestBody = new
         {
             input = text,
@@ -151,26 +160,33 @@ public class EmbeddingService : IEmbeddingService
         };
 
         var json = JsonSerializer.Serialize(requestBody);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+        using var response = await _httpClient.PostAsync("https://api.openai.com/v1/embeddings", content);
 
-        var response = await _httpClient.PostAsync("https://api.openai.com/v1/embeddings", content);
-        
         if (!response.IsSuccessStatusCode)
         {
+            stopwatch.Stop();
             var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Embedding request failed with status {StatusCode} after {ElapsedMilliseconds} ms: {Error}", response.StatusCode, stopwatch.Elapsed.TotalMilliseconds, errorContent);
             throw new HttpRequestException($"OpenAI API request failed with status {response.StatusCode}: {errorContent}");
         }
 
         var responseJson = await response.Content.ReadAsStringAsync();
         var responseData = JsonSerializer.Deserialize<JsonElement>(responseJson);
-        
+
         var embeddingArray = responseData.GetProperty("data")[0].GetProperty("embedding");
         var embedding = new float[embeddingArray.GetArrayLength()];
-        
+
         for (int i = 0; i < embedding.Length; i++)
         {
             embedding[i] = embeddingArray[i].GetSingle();
         }
+
+        stopwatch.Stop();
+        _logger.LogInformation(
+            "Received embedding response from OpenAI in {ElapsedMilliseconds} ms. Dimensions={Dimensions}",
+            stopwatch.Elapsed.TotalMilliseconds,
+            embedding.Length);
 
         return embedding;
     }
@@ -178,7 +194,27 @@ public class EmbeddingService : IEmbeddingService
     private async Task<List<float[]>> GenerateEmbeddingsFromApiAsync(List<string> texts)
     {
         var model = _openAIConfig.Models.Embeddings;
-        
+
+        var averageLength = 0;
+        if (texts.Count > 0)
+        {
+            var totalLength = 0;
+            foreach (var entry in texts)
+            {
+                totalLength += entry.Length;
+            }
+
+            averageLength = totalLength / texts.Count;
+        }
+
+        _logger.LogInformation(
+            "Requesting {Count} embeddings from OpenAI with model {Model}. AvgTextLength={AverageLength}",
+            texts.Count,
+            model,
+            averageLength);
+
+        var stopwatch = Stopwatch.StartNew();
+
         var requestBody = new
         {
             input = texts,
@@ -187,34 +223,42 @@ public class EmbeddingService : IEmbeddingService
         };
 
         var json = JsonSerializer.Serialize(requestBody);
-        var content = new StringContent(json, Encoding.UTF8, "application/json");
+        using var content = new StringContent(json, Encoding.UTF8, "application/json");
+        using var response = await _httpClient.PostAsync("https://api.openai.com/v1/embeddings", content);
 
-        var response = await _httpClient.PostAsync("https://api.openai.com/v1/embeddings", content);
-        
         if (!response.IsSuccessStatusCode)
         {
+            stopwatch.Stop();
             var errorContent = await response.Content.ReadAsStringAsync();
+            _logger.LogError("Batch embedding request failed with status {StatusCode} after {ElapsedMilliseconds} ms: {Error}", response.StatusCode, stopwatch.Elapsed.TotalMilliseconds, errorContent);
             throw new HttpRequestException($"OpenAI API request failed with status {response.StatusCode}: {errorContent}");
         }
 
         var responseJson = await response.Content.ReadAsStringAsync();
         var responseData = JsonSerializer.Deserialize<JsonElement>(responseJson);
-        
+
         var embeddings = new List<float[]>();
         var dataArray = responseData.GetProperty("data");
-        
+
         for (int i = 0; i < dataArray.GetArrayLength(); i++)
         {
             var embeddingArray = dataArray[i].GetProperty("embedding");
             var embedding = new float[embeddingArray.GetArrayLength()];
-            
+
             for (int j = 0; j < embedding.Length; j++)
             {
                 embedding[j] = embeddingArray[j].GetSingle();
             }
-            
+
             embeddings.Add(embedding);
         }
+
+        stopwatch.Stop();
+        _logger.LogInformation(
+            "Received {Count} embeddings from OpenAI in {ElapsedMilliseconds} ms. Dimensions={Dimensions}",
+            embeddings.Count,
+            stopwatch.Elapsed.TotalMilliseconds,
+            embeddings.Count > 0 ? embeddings[0].Length : 0);
 
         return embeddings;
     }
@@ -230,6 +274,17 @@ public class EmbeddingService : IEmbeddingService
         return text.Trim().Replace("\r\n", "\n").Replace("\r", "\n");
     }
 
+    private static string TruncateForLog(string? value, int maxLength = 200)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= maxLength
+            ? value
+            : value[..maxLength] + "...";
+    }
     private void CacheEmbedding(string text, float[] embedding)
     {
         // Implement simple LRU eviction if cache is full
@@ -245,3 +300,5 @@ public class EmbeddingService : IEmbeddingService
         _cache.TryAdd(text, (embedding, DateTime.UtcNow));
     }
 }
+
+

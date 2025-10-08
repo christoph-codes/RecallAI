@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using RecallAI.Api.Data;
 
 namespace RecallAI.Api.Controllers;

@@ -16,7 +16,9 @@ interface UseCreateMemoryReturn {
   /** Whether the last creation was successful */
   isSuccess: boolean;
   /** Function to create a new memory */
-  createMemoryMutation: (request: CreateMemoryRequest) => Promise<void>;
+  createMemoryMutation: (
+    request: CreateMemoryRequest
+  ) => Promise<MemoryResponse>;
   /** Function to reset the hook state */
   reset: () => void;
 }
@@ -78,6 +80,7 @@ export const useCreateMemory = (): UseCreateMemoryReturn => {
         setData(result);
         setIsSuccess(true);
         setError(null);
+        return result;
       } catch (err) {
         const error =
           err instanceof Error ? err : new Error("Unknown error occurred");

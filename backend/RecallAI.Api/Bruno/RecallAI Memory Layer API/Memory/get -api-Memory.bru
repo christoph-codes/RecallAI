@@ -5,16 +5,12 @@ meta {
 }
 
 get {
-  url: {{baseUrl}}/api/Memory
+  url: {{recallApi_baseUrl}}/api/Memory
   body: none
-  auth: bearer
+  auth: inherit
 }
 
 params:query {
   ~page: 
   ~pageSize: 
-}
-
-auth:bearer {
-  token: {{token}}
 }

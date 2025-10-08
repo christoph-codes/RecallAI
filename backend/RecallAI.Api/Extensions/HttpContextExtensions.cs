@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace RecallAI.Api.Extensions;
 

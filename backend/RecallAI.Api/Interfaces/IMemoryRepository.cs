@@ -7,7 +7,7 @@ public interface IMemoryRepository
     Task<Memory?> GetByIdAsync(Guid id, Guid userId);
     Task<List<Memory>> GetAllByUserAsync(Guid userId, int page, int pageSize);
     Task<int> GetCountByUserAsync(Guid userId);
-    Task<Memory> CreateAsync(Memory memory);
+    Task<Memory> CreateAsync(Memory memory, float[]? embedding = null, string? modelName = null);
     Task<Memory> UpdateAsync(Memory memory);
     Task<bool> DeleteAsync(Guid id, Guid userId);
     Task<bool> ExistsAsync(Guid id, Guid userId);

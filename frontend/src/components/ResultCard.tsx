@@ -76,7 +76,7 @@ const ResultCard = ({
         </div>
 
         {/* Metadata (if exists) */}
-        {Object.keys(memory.metadata).length > 0 && (
+        {memory.metadata && Object.keys(memory.metadata).length > 0 && (
           <div className="text-gray-400 text-xs mb-3 bg-gray-700/20 rounded-lg p-2 border border-gray-600/20">
             <div className="font-medium mb-1">Metadata:</div>
             <pre className="whitespace-pre-wrap">

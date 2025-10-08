@@ -280,6 +280,7 @@ FakesAssemblies/
 # Node.js Tools for Visual Studio
 .ntvs_analysis.dat
 node_modules/
+.next/
 
 # Visual Studio 6 build log
 *.plg
@@ -396,3 +397,6 @@ FodyWeavers.xsd
 # Local development settings (contains secrets)
 **/appsettings.Development.json
 **/appsettings.Local.json
+
+# Visual Studio 2015/2017 cache/options directory
+.vs/

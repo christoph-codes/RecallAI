@@ -24,6 +24,7 @@ builder.Services.AddSingleton<NpgsqlDataSource>(serviceProvider =>
     
     var dsb = new NpgsqlDataSourceBuilder(connString);
     dsb.EnableDynamicJson();
+    dsb.UseVector();
     return dsb.Build();
 });
 
@@ -453,7 +454,3 @@ static string BuildConnectionStringFromDatabaseUrl(string databaseUrl)
 
     return builder.ConnectionString;
 }
-
-
-
-

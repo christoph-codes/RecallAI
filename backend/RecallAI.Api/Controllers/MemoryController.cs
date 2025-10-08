@@ -10,6 +10,7 @@ using RecallAI.Api.Models.Dto;
 using RecallAI.Api.Models.Search;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
+using System.Net.Http;
 
 namespace RecallAI.Api.Controllers;
 
@@ -55,8 +56,12 @@ public class MemoryController : ControllerBase
         {
             var userId = Guid.Parse(HttpContext.GetCurrentUserIdOrThrow());
 
+            _logger.LogInformation("GetMemories request started for user {UserId} (page {Page}, pageSize {PageSize})", userId, page, pageSize);
+
             var totalCount = await _memoryRepository.GetCountByUserAsync(userId);
+            _logger.LogInformation("Retrieved memory count {TotalCount} for user {UserId}", totalCount, userId);
             var memories = await _memoryRepository.GetAllByUserAsync(userId, page, pageSize);
+            _logger.LogInformation("Loaded {MemoryCount} memories for user {UserId}", memories.Count, userId);
 
             var response = new MemoryListResponse
             {
@@ -75,6 +80,7 @@ public class MemoryController : ControllerBase
                 PageSize = pageSize
             };
 
+            _logger.LogInformation("Returning {MemoryCount} memories for user {UserId}", response.Memories.Count, userId);
             return Ok(response);
         }
         catch (UnauthorizedAccessException)
@@ -152,7 +158,23 @@ public class MemoryController : ControllerBase
                 Metadata = request.Metadata ?? new Dictionary<string, object>()
             };
 
-            var createdMemory = await _memoryRepository.CreateAsync(memory);
+            float[]? embedding = null;
+            try
+            {
+                embedding = await _embeddingService.GenerateEmbeddingAsync(memory.Content);
+            }
+            catch (HttpRequestException ex)
+            {
+                _logger.LogError(ex, "Failed to generate embedding while creating memory for user {UserId}", userId);
+                return StatusCode(503, new { Message = "Memory service temporarily unavailable. Please try again." });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Unexpected error generating embedding while creating memory for user {UserId}", userId);
+                return StatusCode(500, new { Message = "An error occurred while processing the memory embedding" });
+            }
+
+            var createdMemory = await _memoryRepository.CreateAsync(memory, embedding);
 
             var response = new MemoryResponse
             {

@@ -1,9 +1,7 @@
-﻿using System.Collections.Generic;
-using System.Net;
-using System.Net.Http;
+﻿using System.Net;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
 using Microsoft.Extensions.Options;
 using RecallAI.Api.Interfaces;
 using RecallAI.Api.Models.Configuration;
@@ -72,8 +70,32 @@ public class OpenAIService : IOpenAIService
         return await GenerateResponseAsync(model, OpenAISystemPrompts.FinalResponse, userPrompt, "final result generation");
     }
 
+    private static bool ModelSupportsTemperature(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return true;
+        }
+
+        return !model.Contains("nano", System.StringComparison.OrdinalIgnoreCase);
+    }
+
     private async Task<string> GenerateResponseAsync(string model, string systemPrompt, string userPrompt, string operationType)
     {
+        ArgumentNullException.ThrowIfNull(systemPrompt);
+        ArgumentNullException.ThrowIfNull(userPrompt);
+
+        _logger.LogInformation(
+            "Sending {OperationType} request to OpenAI with model {Model}. SystemPromptLength={SystemPromptLength}, UserPromptLength={UserPromptLength}. SystemPromptPreview={SystemPromptPreview}, UserPromptPreview={UserPromptPreview}",
+            operationType,
+            model,
+            systemPrompt.Length,
+            userPrompt.Length,
+            TruncateForLog(systemPrompt),
+            TruncateForLog(userPrompt));
+
+        var stopwatch = Stopwatch.StartNew();
+
         try
         {
             var requestPayload = new Dictionary<string, object?>
@@ -85,6 +107,11 @@ public class OpenAIService : IOpenAIService
 
             // Only include temperature for models that support it
             if (SupportsTemperature(model))
+            {
+                requestPayload["temperature"] = 0.7;
+            }
+
+            if (ModelSupportsTemperature(model))
             {
                 requestPayload["temperature"] = 0.7;
             }
@@ -106,13 +133,21 @@ public class OpenAIService : IOpenAIService
 
             var messageContent = OpenAIResponseHelpers.ExtractTextContent(responseData);
 
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "Received {OperationType} response from OpenAI in {ElapsedMilliseconds} ms. ResponsePreview={ResponsePreview}",
+                operationType,
+                stopwatch.Elapsed.TotalMilliseconds,
+                TruncateForLog(messageContent));
+
             _logger.LogDebug("Generated {OperationType} using model {Model}", operationType, model);
 
             return messageContent;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate {OperationType} using model {Model}", operationType, model);
+            stopwatch.Stop();
+            _logger.LogError(ex, "Failed to generate {OperationType} using model {Model} after {ElapsedMilliseconds} ms", operationType, model, stopwatch.Elapsed.TotalMilliseconds);
             throw;
         }
     }
@@ -125,10 +160,20 @@ public class OpenAIService : IOpenAIService
         string? systemPrompt = null,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(prompt);
+
         var selectedModel = model ?? _openAIConfig.Models.FinalResult;
         var selectedTemperature = temperature ?? 0.7;
         var selectedMaxTokens = maxTokens ?? 2000;
         var effectiveSystemPrompt = systemPrompt ?? OpenAISystemPrompts.FinalResponse;
+
+        _logger.LogInformation(
+            "Sending streaming completion request to OpenAI with model {Model}. SystemPromptLength={SystemPromptLength}, PromptLength={PromptLength}. SystemPromptPreview={SystemPromptPreview}, PromptPreview={PromptPreview}",
+            selectedModel,
+            effectiveSystemPrompt?.Length ?? 0,
+            prompt.Length,
+            TruncateForLog(effectiveSystemPrompt),
+            TruncateForLog(prompt));
 
         var requestPayload = new Dictionary<string, object?>
         {
@@ -144,6 +189,11 @@ public class OpenAIService : IOpenAIService
             requestPayload["temperature"] = selectedTemperature;
         }
 
+        if (ModelSupportsTemperature(selectedModel))
+        {
+            requestPayload["temperature"] = selectedTemperature;
+        }
+
         var json = JsonSerializer.Serialize(requestPayload, OpenAIResponseHelpers.RequestSerializerOptions);
         using var content = new StringContent(json, Encoding.UTF8, "application/json");
 
@@ -152,6 +202,9 @@ public class OpenAIService : IOpenAIService
             Content = content
         };
 
+        var stopwatch = Stopwatch.StartNew();
+        var responseBuffer = new StringBuilder();
+
         HttpResponseMessage response;
         try
         {
@@ -159,12 +212,14 @@ public class OpenAIService : IOpenAIService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to send request to OpenAI API using model {Model}", selectedModel);
+            stopwatch.Stop();
+            _logger.LogError(ex, "Failed to send request to OpenAI API using model {Model} after {ElapsedMilliseconds} ms", selectedModel, stopwatch.Elapsed.TotalMilliseconds);
             yield break;
         }
 
         if (!response.IsSuccessStatusCode)
         {
+            stopwatch.Stop();
             var errorContent = await response.Content.ReadAsStringAsync();
 
             // Parse OpenAI error response for better error messages
@@ -230,12 +285,19 @@ public class OpenAIService : IOpenAIService
 
                 if (OpenAIResponseHelpers.TryExtractStreamDelta(jsonData, out var delta) && !string.IsNullOrEmpty(delta))
                 {
+                    responseBuffer.Append(delta);
                     yield return delta;
                 }
             }
         }
 
-        _logger.LogDebug("Completed streaming completion using model {Model}", selectedModel);
+        stopwatch.Stop();
+        _logger.LogInformation(
+            "Completed streaming completion using model {Model} in {ElapsedMilliseconds} ms. TotalChars={TotalChars}. ResponsePreview={ResponsePreview}",
+            selectedModel,
+            stopwatch.Elapsed.TotalMilliseconds,
+            responseBuffer.Length,
+            TruncateForLog(responseBuffer.ToString()));
     }
 
     private static bool SupportsTemperature(string model)
@@ -244,7 +306,18 @@ public class OpenAIService : IOpenAIService
         return !model.StartsWith("o1-", StringComparison.OrdinalIgnoreCase);
     }
 
-    private string GetUserFriendlyErrorMessage(HttpStatusCode statusCode, string errorContent)
+    private static string TruncateForLog(string? value, int maxLength = 300)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= maxLength
+            ? value
+            : value[..maxLength] + "...";
+    }
+private string GetUserFriendlyErrorMessage(HttpStatusCode statusCode, string errorContent)
     {
         try
         {
@@ -259,21 +332,21 @@ public class OpenAIService : IOpenAIService
                 return (statusCode, errorType, errorCode) switch
                 {
                     (HttpStatusCode.TooManyRequests, _, _) =>
-                        "⏳ **Rate limit exceeded.** Please wait a moment and try again.",
+                        "? **Rate limit exceeded.** Please wait a moment and try again.",
 
                     (HttpStatusCode.Unauthorized, _, _) =>
-                        "🔑 **API key issue.** Please check your OpenAI API key configuration.",
+                        "?? **API key issue.** Please check your OpenAI API key configuration.",
 
                     (HttpStatusCode.PaymentRequired, _, _) or (_, "insufficient_quota", _) =>
-                        "💳 **Quota exceeded.** Your OpenAI API quota has been reached. Please check your billing at platform.openai.com.",
+                        "?? **Quota exceeded.** Your OpenAI API quota has been reached. Please check your billing at platform.openai.com.",
 
                     (HttpStatusCode.BadRequest, "invalid_request_error", _) =>
-                        $"❌ **Invalid request:** {errorMessage}",
+                        $"? **Invalid request:** {errorMessage}",
 
                     (HttpStatusCode.InternalServerError, _, _) =>
-                        "🔧 **OpenAI service issue.** The OpenAI API is experiencing issues. Please try again later.",
+                        "?? **OpenAI service issue.** The OpenAI API is experiencing issues. Please try again later.",
 
-                    _ => $"⚠️ **API Error ({statusCode}):** {errorMessage ?? "Unknown error occurred"}"
+                    _ => $"?? **API Error ({statusCode}):** {errorMessage ?? "Unknown error occurred"}"
                 };
             }
         }
@@ -284,11 +357,11 @@ public class OpenAIService : IOpenAIService
 
         return statusCode switch
         {
-            HttpStatusCode.TooManyRequests => "⏳ **Rate limit exceeded.** Please wait and try again.",
-            HttpStatusCode.Unauthorized => "🔑 **Authentication failed.** Please check your API key.",
-            HttpStatusCode.PaymentRequired => "💳 **Quota exceeded.** Please check your OpenAI billing.",
-            HttpStatusCode.InternalServerError => "🔧 **Service unavailable.** Please try again later.",
-            _ => $"⚠️ **Error ({statusCode}).** Please try again or contact support."
+            HttpStatusCode.TooManyRequests => "? **Rate limit exceeded.** Please wait and try again.",
+            HttpStatusCode.Unauthorized => "?? **Authentication failed.** Please check your API key.",
+            HttpStatusCode.PaymentRequired => "?? **Quota exceeded.** Please check your OpenAI billing.",
+            HttpStatusCode.InternalServerError => "?? **Service unavailable.** Please try again later.",
+            _ => $"?? **Error ({statusCode}).** Please try again or contact support."
         };
     }
 }

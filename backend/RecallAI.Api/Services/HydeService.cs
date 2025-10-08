@@ -1,5 +1,4 @@
-﻿using System.Collections.Generic;
-using System.Net.Http;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -75,6 +74,14 @@ public class HydeService : IHydeService
 
         var userPrompt = BuildUserPrompt(query);
 
+        _logger.LogInformation(
+            "Sending HyDE request to OpenAI with model {Model}. QueryLength={QueryLength}. QueryPreview={QueryPreview}",
+            _hydeConfig.Model,
+            query.Length,
+            TruncateForLog(query));
+
+        var stopwatch = Stopwatch.StartNew();
+
         try
         {
             var requestPayload = new Dictionary<string, object?>
@@ -85,7 +92,7 @@ public class HydeService : IHydeService
             };
 
             // Only include temperature for models that support it
-            if (SupportsTemperature(_hydeConfig.Model))
+            if (ModelSupportsTemperature(_hydeConfig.Model))
             {
                 requestPayload["temperature"] = 0.7;
             }
@@ -96,25 +103,35 @@ public class HydeService : IHydeService
             using var response = await _httpClient.PostAsync(ResponsesEndpoint, content);
             if (!response.IsSuccessStatusCode)
             {
+                stopwatch.Stop();
                 var errorContent = await response.Content.ReadAsStringAsync();
                 throw new HttpRequestException($"HyDE generation failed with status {response.StatusCode}: {errorContent}");
             }
 
             var responseJson = await response.Content.ReadAsStringAsync();
             var responseData = JsonSerializer.Deserialize<JsonElement>(responseJson);
-            var document = OpenAIResponseHelpers.ExtractTextContent(responseData);
+            var document = OpenAIResponseHelpers.ExtractTextContent(responseData)?.Trim();
 
             if (string.IsNullOrWhiteSpace(document))
             {
-                throw new InvalidOperationException("HyDE generation returned an empty document.");
+                _logger.LogWarning("HyDE response contained no text for query hash {QueryKey}; using original query instead", normalizedQuery);
+                document = query.Trim();
             }
+
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "Received HyDE response for query hash {QueryKey} in {ElapsedMilliseconds} ms. ResponsePreview={ResponsePreview}",
+                normalizedQuery,
+                stopwatch.Elapsed.TotalMilliseconds,
+                TruncateForLog(document));
 
             CacheDocument(normalizedQuery, document);
             return document;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to generate HyDE document for query hash {QueryKey}", normalizedQuery);
+            stopwatch.Stop();
+            _logger.LogError(ex, "Failed to generate HyDE document for query hash {QueryKey} after {ElapsedMilliseconds} ms", normalizedQuery, stopwatch.Elapsed.TotalMilliseconds);
             throw;
         }
     }
@@ -150,6 +167,28 @@ public class HydeService : IHydeService
         return false;
     }
 
+    private static bool ModelSupportsTemperature(string model)
+    {
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return true;
+        }
+
+        return !model.Contains("nano", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string TruncateForLog(string? value, int maxLength = 200)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        return value.Length <= maxLength
+            ? value
+            : value[..maxLength] + "...";
+    }
+
     private void CacheDocument(string key, string document)
     {
         lock (_cacheLock)
@@ -164,11 +203,5 @@ public class HydeService : IHydeService
 
             _cache[key] = (document, DateTime.UtcNow);
         }
-    }
-
-    private static bool SupportsTemperature(string model)
-    {
-        // OpenAI o1-preview and o1-mini models don't support temperature parameter
-        return !model.StartsWith("o1-", StringComparison.OrdinalIgnoreCase);
     }
 }

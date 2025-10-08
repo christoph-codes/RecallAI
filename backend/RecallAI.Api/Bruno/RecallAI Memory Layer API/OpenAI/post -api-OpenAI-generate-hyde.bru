@@ -5,17 +5,13 @@ meta {
 }
 
 post {
-  url: {{baseUrl}}/api/OpenAI/generate-hyde
+  url: {{recallApi_baseUrl}}/api/OpenAI/generate-hyde
   body: json
-  auth: bearer
-}
-
-auth:bearer {
-  token: {{token}}
+  auth: inherit
 }
 
 body:json {
   {
-    "query": ""
+    "query": "Where did I go to middle school?"
   }
 }

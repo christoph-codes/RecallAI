@@ -1,18 +1,24 @@
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using RecallAI.Api.Data;
 using RecallAI.Api.Interfaces;
 using RecallAI.Api.Models;
 using Pgvector;
+using Npgsql;
 
 namespace RecallAI.Api.Repositories;
 
 public class MemoryRepository : IMemoryRepository
 {
     private readonly MemoryDbContext _context;
+    private readonly NpgsqlDataSource _dataSource;
+    private readonly ILogger<MemoryRepository> _logger;
 
-    public MemoryRepository(MemoryDbContext context)
+    public MemoryRepository(MemoryDbContext context, NpgsqlDataSource dataSource, ILogger<MemoryRepository> logger)
     {
         _context = context;
+        _dataSource = dataSource;
+        _logger = logger;
     }
 
     public async Task<Memory?> GetByIdAsync(Guid id, Guid userId)
@@ -23,12 +29,59 @@ public class MemoryRepository : IMemoryRepository
 
     public async Task<List<Memory>> GetAllByUserAsync(Guid userId, int page, int pageSize)
     {
-        return await _context.Memories
-            .Where(m => m.UserId == userId)
-            .OrderByDescending(m => m.CreatedAt)
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .ToListAsync();
+        _logger.LogInformation("GetAllByUserAsync started for user {UserId} (page {Page}, pageSize {PageSize})", userId, page, pageSize);
+
+        var offset = Math.Max(0, (page - 1) * pageSize);
+        var commandTimeout = _context.Database.GetCommandTimeout() ?? 120;
+
+        const string sql = @"\r
+            SELECT id, user_id, title, content, content_type, metadata, created_at, updated_at\r
+            FROM memories\r
+            WHERE user_id = @userId\r
+            ORDER BY created_at DESC\r
+            OFFSET @offset\r
+            LIMIT @limit;\r
+        ";
+
+        var results = new List<Memory>(pageSize);
+
+        _logger.LogInformation("Opening PostgreSQL connection for GetAllByUserAsync for user {UserId}", userId);
+        await using var connection = await _dataSource.OpenConnectionAsync();
+        _logger.LogInformation("Connection established for GetAllByUserAsync for user {UserId}", userId);
+
+        await using var command = new NpgsqlCommand(sql, connection)
+        {
+            CommandTimeout = commandTimeout
+        };
+
+        command.Parameters.AddWithValue("@userId", userId);
+        command.Parameters.AddWithValue("@offset", offset);
+        command.Parameters.AddWithValue("@limit", pageSize);
+
+        _logger.LogInformation("Executing memory list query for user {UserId}", userId);
+        await using var reader = await command.ExecuteReaderAsync();
+        _logger.LogInformation("Memory list query completed for user {UserId}", userId);
+
+        while (await reader.ReadAsync())
+        {
+            var memory = new Memory
+            {
+                Id = reader.GetGuid(reader.GetOrdinal("id")),
+                UserId = reader.IsDBNull(reader.GetOrdinal("user_id")) ? null : reader.GetGuid(reader.GetOrdinal("user_id")),
+                Title = reader.IsDBNull(reader.GetOrdinal("title")) ? null : reader.GetString(reader.GetOrdinal("title")),
+                Content = reader.GetString(reader.GetOrdinal("content")),
+                ContentType = reader.IsDBNull(reader.GetOrdinal("content_type")) ? "text" : reader.GetString(reader.GetOrdinal("content_type")),
+                Metadata = reader.IsDBNull(reader.GetOrdinal("metadata")) ? null :
+                    System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(reader.GetString(reader.GetOrdinal("metadata"))),
+                CreatedAt = reader.GetFieldValue<DateTimeOffset>(reader.GetOrdinal("created_at")),
+                UpdatedAt = reader.GetFieldValue<DateTimeOffset>(reader.GetOrdinal("updated_at"))
+            };
+
+            results.Add(memory);
+        }
+
+        _logger.LogInformation("GetAllByUserAsync completed for user {UserId} with {Count} results", userId, results.Count);
+        return results;
     }
 
     public async Task<int> GetCountByUserAsync(Guid userId)
@@ -37,13 +90,36 @@ public class MemoryRepository : IMemoryRepository
             .CountAsync(m => m.UserId == userId);
     }
 
-    public async Task<Memory> CreateAsync(Memory memory)
+    public async Task<Memory> CreateAsync(Memory memory, float[]? embedding = null, string? modelName = null)
     {
-        memory.Id = Guid.NewGuid();
-        memory.CreatedAt = DateTimeOffset.UtcNow;
-        memory.UpdatedAt = DateTimeOffset.UtcNow;
+        if (memory is null)
+        {
+            throw new ArgumentNullException(nameof(memory));
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        memory.Id = memory.Id == Guid.Empty ? Guid.NewGuid() : memory.Id;
+        memory.CreatedAt = now;
+        memory.UpdatedAt = now;
+        memory.Metadata ??= new Dictionary<string, object>();
 
         _context.Memories.Add(memory);
+
+        if (embedding is { Length: > 0 })
+        {
+            var memoryEmbedding = new MemoryEmbedding
+            {
+                Id = Guid.NewGuid(),
+                MemoryId = memory.Id,
+                Embedding = new Vector(embedding),
+                ModelName = string.IsNullOrWhiteSpace(modelName) ? "text-embedding-3-small" : modelName,
+                CreatedAt = now
+            };
+
+            memory.MemoryEmbeddings.Add(memoryEmbedding);
+            _context.MemoryEmbeddings.Add(memoryEmbedding);
+        }
+
         await _context.SaveChangesAsync();
         return memory;
     }
@@ -78,47 +154,50 @@ public class MemoryRepository : IMemoryRepository
     public async Task<List<(Memory memory, double similarity)>> SearchSimilarAsync(Guid userId, float[] queryEmbedding, int limit, double threshold)
     {
         var queryVector = new Vector(queryEmbedding);
-        
-        // Use raw SQL for vector similarity search with pgvector
+
+        _logger.LogInformation(
+            "Executing vector similarity search for user {UserId} with limit {Limit} and threshold {Threshold}. EmbeddingDimensions={Dimensions}",
+            userId,
+            limit,
+            threshold,
+            queryEmbedding.Length);
+
+        var stopwatch = Stopwatch.StartNew();
+
         var sql = @"
-            SELECT m.""Id"", m.""UserId"", m.""Title"", m.""Content"", m.""ContentType"",
-                   m.""Metadata"", m.""CreatedAt"", m.""UpdatedAt"",
-                   (1 - (me.""Embedding"" <=> @queryVector)) as similarity
-            FROM ""Memories"" m
-            INNER JOIN ""MemoryEmbeddings"" me ON m.""Id"" = me.""MemoryId""
-            WHERE m.""UserId"" = @userId
-                AND (1 - (me.""Embedding"" <=> @queryVector)) >= @threshold
-            ORDER BY me.""Embedding"" <=> @queryVector
-            LIMIT @limit";
+            SELECT m.id AS ""Id"", m.user_id AS ""UserId"", m.title AS ""Title"",
+                   m.content AS ""Content"", m.content_type AS ""ContentType"",
+                   m.metadata AS ""Metadata"", m.created_at AS ""CreatedAt"",
+                   m.updated_at AS ""UpdatedAt"",
+                   (1 - (me.embedding OPERATOR(vector.<=>) @queryVector)) AS similarity
+            FROM memories m
+            JOIN memory_embeddings me ON m.id = me.memory_id
+            WHERE m.user_id = @userId
+              AND (1 - (me.embedding OPERATOR(vector.<=>) @queryVector)) >= @threshold
+            ORDER BY me.embedding OPERATOR(vector.<=>) @queryVector
+            LIMIT @limit;
+";
 
         var results = new List<(Memory memory, double similarity)>();
-        
-        using var command = _context.Database.GetDbConnection().CreateCommand();
-        command.CommandText = sql;
-        
-        var userIdParam = command.CreateParameter();
-        userIdParam.ParameterName = "@userId";
-        userIdParam.Value = userId;
-        command.Parameters.Add(userIdParam);
-        
-        var queryVectorParam = command.CreateParameter();
-        queryVectorParam.ParameterName = "@queryVector";
-        queryVectorParam.Value = queryVector;
-        command.Parameters.Add(queryVectorParam);
-        
-        var thresholdParam = command.CreateParameter();
-        thresholdParam.ParameterName = "@threshold";
-        thresholdParam.Value = threshold;
-        command.Parameters.Add(thresholdParam);
-        
-        var limitParam = command.CreateParameter();
-        limitParam.ParameterName = "@limit";
-        limitParam.Value = limit;
-        command.Parameters.Add(limitParam);
 
-        await _context.Database.OpenConnectionAsync();
-        
-        using var reader = await command.ExecuteReaderAsync();
+        var commandTimeout = _context.Database.GetCommandTimeout() ?? 120;
+
+        _logger.LogInformation("Opening PostgreSQL connection for vector search for user {UserId}", userId);
+        await using var connection = await _dataSource.OpenConnectionAsync();
+        _logger.LogInformation("Connection established for vector search for user {UserId}", userId);
+        await using var command = new NpgsqlCommand(sql, connection)
+        {
+            CommandTimeout = commandTimeout
+        };
+
+        command.Parameters.AddWithValue("@userId", userId);
+        command.Parameters.AddWithValue("@queryVector", queryVector);
+        command.Parameters.AddWithValue("@threshold", threshold);
+        command.Parameters.AddWithValue("@limit", limit);
+
+        _logger.LogInformation("Executing vector similarity query for user {UserId}", userId);
+        await using var reader = await command.ExecuteReaderAsync();
+        _logger.LogInformation("Vector similarity query completed for user {UserId}", userId);
         while (await reader.ReadAsync())
         {
             var memory = new Memory
@@ -133,16 +212,35 @@ public class MemoryRepository : IMemoryRepository
                 CreatedAt = reader.GetDateTime(reader.GetOrdinal("CreatedAt")),
                 UpdatedAt = reader.GetDateTime(reader.GetOrdinal("UpdatedAt"))
             };
-            
+
             var similarity = reader.GetDouble(reader.GetOrdinal("similarity"));
             results.Add((memory, similarity));
         }
-        
+
+        stopwatch.Stop();
+        var topSimilarity = results.Count > 0 ? results.Max(r => r.similarity) : (double?)null;
+
+        _logger.LogInformation(
+            "Vector similarity search for user {UserId} completed in {ElapsedMilliseconds} ms with {ResultCount} results. TopSimilarity={TopSimilarity}",
+            userId,
+            stopwatch.Elapsed.TotalMilliseconds,
+            results.Count,
+            topSimilarity);
+
         return results;
     }
 
     public async Task<List<(Memory memory, double queryScore, double hydeScore)>> HybridSearchAsync(Guid userId, float[] queryEmbedding, float[] hydeEmbedding, int limit, double threshold)
     {
+        _logger.LogInformation(
+            "Executing hybrid search for user {UserId} with limit {Limit} and threshold {Threshold}. QueryDimensions={QueryDimensions}, HydeDimensions={HydeDimensions}",
+            userId,
+            limit,
+            threshold,
+            queryEmbedding.Length,
+            hydeEmbedding.Length);
+
+        var stopwatch = Stopwatch.StartNew();
         var combinedResults = new Dictionary<Guid, (Memory memory, double queryScore, double hydeScore)>();
 
         var queryResults = await SearchSimilarAsync(userId, queryEmbedding, limit, threshold);
@@ -164,7 +262,19 @@ public class MemoryRepository : IMemoryRepository
             }
         }
 
-        return combinedResults.Values.ToList();
+        var finalResults = combinedResults.Values.ToList();
+
+        stopwatch.Stop();
+
+        _logger.LogInformation(
+            "Hybrid search for user {UserId} completed in {ElapsedMilliseconds} ms. QueryMatches={QueryMatches}, HydeMatches={HydeMatches}, CombinedResults={CombinedResults}",
+            userId,
+            stopwatch.Elapsed.TotalMilliseconds,
+            queryResults.Count,
+            hydeResults.Count,
+            finalResults.Count);
+
+        return finalResults;
     }
 
     public async Task<bool> HasEmbeddingAsync(Guid memoryId)
@@ -173,3 +283,4 @@ public class MemoryRepository : IMemoryRepository
             .AnyAsync(me => me.MemoryId == memoryId && me.Embedding != null);
     }
 }
+

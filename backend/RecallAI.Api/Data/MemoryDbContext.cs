@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using RecallAI.Api.Models;
-using Pgvector.EntityFrameworkCore;
 
 namespace RecallAI.Api.Data;
 

@@ -5,18 +5,14 @@ meta {
 }
 
 post {
-  url: {{baseUrl}}/api/OpenAI/evaluate-memory
+  url: {{recallApi_baseUrl}}/api/OpenAI/evaluate-memory
   body: json
-  auth: bearer
-}
-
-auth:bearer {
-  token: {{token}}
+  auth: inherit
 }
 
 body:json {
   {
-    "memoryContent": "",
-    "evaluationCriteria": ""
+    "memoryContent": "When is sarah's birthday?",
+    "evaluationCriteria": "simple"
   }
 }
