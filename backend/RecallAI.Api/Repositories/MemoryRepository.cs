@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using Microsoft.EntityFrameworkCore;
 using RecallAI.Api.Data;
 using RecallAI.Api.Interfaces;
@@ -154,29 +155,36 @@ public class MemoryRepository : IMemoryRepository
     public async Task<List<(Memory memory, double similarity)>> SearchSimilarAsync(Guid userId, float[] queryEmbedding, int limit, double threshold)
     {
         var queryVector = new Vector(queryEmbedding);
+        var normalizedThreshold = Math.Clamp(threshold, 0d, 1d);
+        var maxDistance = 1d - normalizedThreshold;
 
         _logger.LogInformation(
-            "Executing vector similarity search for user {UserId} with limit {Limit} and threshold {Threshold}. EmbeddingDimensions={Dimensions}",
+            "Executing vector similarity search for user {UserId} with limit {Limit} and threshold {Threshold}. NormalizedThreshold={NormalizedThreshold}, MaxDistance={MaxDistance}. EmbeddingDimensions={Dimensions}",
             userId,
             limit,
             threshold,
+            normalizedThreshold,
+            maxDistance,
             queryEmbedding.Length);
 
         var stopwatch = Stopwatch.StartNew();
 
-        var sql = @"
-            SELECT m.id AS ""Id"", m.user_id AS ""UserId"", m.title AS ""Title"",
-                   m.content AS ""Content"", m.content_type AS ""ContentType"",
-                   m.metadata AS ""Metadata"", m.created_at AS ""CreatedAt"",
-                   m.updated_at AS ""UpdatedAt"",
-                   (1 - (me.embedding OPERATOR(vector.<=>) @queryVector)) AS similarity
-            FROM memories m
-            JOIN memory_embeddings me ON m.id = me.memory_id
-            WHERE m.user_id = @userId
-              AND (1 - (me.embedding OPERATOR(vector.<=>) @queryVector)) >= @threshold
-            ORDER BY me.embedding OPERATOR(vector.<=>) @queryVector
-            LIMIT @limit;
-";
+        var sqlBuilder = new StringBuilder();
+        sqlBuilder.AppendLine(@"            SELECT m.id AS ""Id"", m.user_id AS ""UserId"", m.title AS ""Title"",");
+        sqlBuilder.AppendLine(@"                   m.content AS ""Content"", m.content_type AS ""ContentType"",");
+        sqlBuilder.AppendLine(@"                   m.metadata AS ""Metadata"", m.created_at AS ""CreatedAt"",");
+        sqlBuilder.AppendLine(@"                   m.updated_at AS ""UpdatedAt"",");
+        sqlBuilder.AppendLine(@"                   (1 - (me.embedding OPERATOR(vector.<=>) @queryVector)) AS similarity");
+        sqlBuilder.AppendLine(@"            FROM memories m");
+        sqlBuilder.AppendLine(@"            JOIN memory_embeddings me ON m.id = me.memory_id");
+        sqlBuilder.AppendLine(@"            WHERE m.user_id = @userId");
+        if (normalizedThreshold > 0d)
+        {
+            sqlBuilder.AppendLine(@"              AND me.embedding OPERATOR(vector.<=>) @queryVector <= @maxDistance");
+        }
+        sqlBuilder.AppendLine(@"            ORDER BY me.embedding OPERATOR(vector.<=>) @queryVector");
+        sqlBuilder.AppendLine(@"            LIMIT @limit;");
+        var sql = sqlBuilder.ToString();
 
         var results = new List<(Memory memory, double similarity)>();
 
@@ -192,8 +200,11 @@ public class MemoryRepository : IMemoryRepository
 
         command.Parameters.AddWithValue("@userId", userId);
         command.Parameters.AddWithValue("@queryVector", queryVector);
-        command.Parameters.AddWithValue("@threshold", threshold);
         command.Parameters.AddWithValue("@limit", limit);
+        if (normalizedThreshold > 0d)
+        {
+            command.Parameters.AddWithValue("@maxDistance", maxDistance);
+        }
 
         _logger.LogInformation("Executing vector similarity query for user {UserId}", userId);
         await using var reader = await command.ExecuteReaderAsync();
@@ -214,6 +225,10 @@ public class MemoryRepository : IMemoryRepository
             };
 
             var similarity = reader.GetDouble(reader.GetOrdinal("similarity"));
+            if (normalizedThreshold > 0d && similarity < normalizedThreshold)
+            {
+                continue;
+            }
             results.Add((memory, similarity));
         }
 
