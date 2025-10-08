@@ -70,16 +70,6 @@ public class OpenAIService : IOpenAIService
         return await GenerateResponseAsync(model, OpenAISystemPrompts.FinalResponse, userPrompt, "final result generation");
     }
 
-    private static bool ModelSupportsTemperature(string model)
-    {
-        if (string.IsNullOrWhiteSpace(model))
-        {
-            return true;
-        }
-
-        return !model.Contains("nano", System.StringComparison.OrdinalIgnoreCase);
-    }
-
     private async Task<string> GenerateResponseAsync(string model, string systemPrompt, string userPrompt, string operationType)
     {
         ArgumentNullException.ThrowIfNull(systemPrompt);
@@ -107,11 +97,6 @@ public class OpenAIService : IOpenAIService
 
             // Only include temperature for models that support it
             if (SupportsTemperature(model))
-            {
-                requestPayload["temperature"] = 0.7;
-            }
-
-            if (ModelSupportsTemperature(model))
             {
                 requestPayload["temperature"] = 0.7;
             }
@@ -185,11 +170,6 @@ public class OpenAIService : IOpenAIService
 
         // Only include temperature for models that support it
         if (SupportsTemperature(selectedModel))
-        {
-            requestPayload["temperature"] = selectedTemperature;
-        }
-
-        if (ModelSupportsTemperature(selectedModel))
         {
             requestPayload["temperature"] = selectedTemperature;
         }
@@ -302,8 +282,23 @@ public class OpenAIService : IOpenAIService
 
     private static bool SupportsTemperature(string model)
     {
-        // OpenAI o1-preview and o1-mini models don't support temperature parameter
-        return !model.StartsWith("o1-", StringComparison.OrdinalIgnoreCase);
+        if (string.IsNullOrWhiteSpace(model))
+        {
+            return true;
+        }
+
+        // Some smaller efficiency models like gpt-*-nano and the o1 family reject temperature overrides.
+        if (model.StartsWith("o1-", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (model.Contains("nano", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static string TruncateForLog(string? value, int maxLength = 300)
