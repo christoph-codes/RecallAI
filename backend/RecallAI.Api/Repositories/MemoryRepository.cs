@@ -35,13 +35,13 @@ public class MemoryRepository : IMemoryRepository
         var offset = Math.Max(0, (page - 1) * pageSize);
         var commandTimeout = _context.Database.GetCommandTimeout() ?? 120;
 
-        const string sql = @"\r
-            SELECT id, user_id, title, content, content_type, metadata, created_at, updated_at\r
-            FROM memories\r
-            WHERE user_id = @userId\r
-            ORDER BY created_at DESC\r
-            OFFSET @offset\r
-            LIMIT @limit;\r
+        const string sql = @"
+            SELECT id, user_id, title, content, content_type, metadata, created_at, updated_at
+            FROM memories
+            WHERE user_id = @userId
+            ORDER BY created_at DESC
+            OFFSET @offset
+            LIMIT @limit;
         ";
 
         var results = new List<Memory>(pageSize);
@@ -99,30 +99,87 @@ public class MemoryRepository : IMemoryRepository
         }
 
         var now = DateTimeOffset.UtcNow;
-        memory.Id = memory.Id == Guid.Empty ? Guid.NewGuid() : memory.Id;
+        memory.Metadata ??= new Dictionary<string, object>();
         memory.CreatedAt = now;
         memory.UpdatedAt = now;
-        memory.Metadata ??= new Dictionary<string, object>();
 
-        _context.Memories.Add(memory);
+        var resolvedModelName = string.IsNullOrWhiteSpace(modelName) ? "text-embedding-3-small" : modelName;
+        var hasProvidedId = memory.Id != Guid.Empty;
+        var shouldCreateEmbedding = embedding is { Length: > 0 };
 
-        if (embedding is { Length: > 0 })
+        const int maxAttempts = 3;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
         {
-            var memoryEmbedding = new MemoryEmbedding
+            if (!hasProvidedId || attempt > 1)
             {
-                Id = Guid.NewGuid(),
-                MemoryId = memory.Id,
-                Embedding = new Vector(embedding),
-                ModelName = string.IsNullOrWhiteSpace(modelName) ? "text-embedding-3-small" : modelName,
-                CreatedAt = now
-            };
+                memory.Id = Guid.NewGuid();
+            }
 
-            memory.MemoryEmbeddings.Add(memoryEmbedding);
-            _context.MemoryEmbeddings.Add(memoryEmbedding);
+            MemoryEmbedding? memoryEmbedding = null;
+            if (shouldCreateEmbedding)
+            {
+                memory.MemoryEmbeddings.Clear();
+                memoryEmbedding = new MemoryEmbedding
+                {
+                    Id = Guid.NewGuid(),
+                    MemoryId = memory.Id,
+                    Embedding = new Vector(embedding!),
+                    ModelName = resolvedModelName,
+                    CreatedAt = now
+                };
+
+                memory.MemoryEmbeddings.Add(memoryEmbedding);
+            }
+
+            _context.Memories.Add(memory);
+
+            try
+            {
+                await _context.SaveChangesAsync();
+                return memory;
+            }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException postgresException &&
+                                               postgresException.SqlState == PostgresErrorCodes.UniqueViolation &&
+                                               string.Equals(postgresException.ConstraintName, "memories_pkey", StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Duplicate primary key '{MemoryId}' detected when creating memory for user {UserId}. Retrying with a new identifier ({Attempt}/{MaxAttempts}).",
+                    memory.Id,
+                    memory.UserId,
+                    attempt,
+                    maxAttempts);
+
+                DetachEntity(memory);
+                if (memoryEmbedding is not null)
+                {
+                    DetachEntity(memoryEmbedding);
+                }
+
+                hasProvidedId = false;
+                if (shouldCreateEmbedding)
+                {
+                    memory.MemoryEmbeddings.Clear();
+                }
+
+                if (attempt == maxAttempts)
+                {
+                    throw;
+                }
+            }
         }
 
-        await _context.SaveChangesAsync();
-        return memory;
+        throw new InvalidOperationException("Unable to create memory after retrying primary key conflicts.");
+    }
+
+    private void DetachEntity(object entity)
+    {
+        var entry = _context.Entry(entity);
+        if (entry.State != EntityState.Detached)
+        {
+            entry.State = EntityState.Detached;
+        }
     }
 
     public async Task<Memory> UpdateAsync(Memory memory)
