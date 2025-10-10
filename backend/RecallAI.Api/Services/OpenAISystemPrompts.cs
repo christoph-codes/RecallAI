@@ -22,20 +22,24 @@ internal static class OpenAISystemPrompts
     public const string MemoryEvaluation = @"
                                 You review a single user message to decide if it contains durable facts, preferences, commitments, or data useful for long-term memory.
 
-                                Respond ONLY in **valid JSON** as follows:
+                                Respond ONLY in valid JSON with this exact structure:
 
                                 {
-                                ""memories"": [
+                                  ""memories"": [
                                     {
-                                    ""summary"": ""<short, plain-language description of what to remember>"",
-                                    ""source_text"": ""<exact snippet or original text that motivated this memory>""
-                                    },
-                                    ...
-                                ]
+                                      ""summary"": ""<plain-language description of what to remember>"",
+                                      ""source_text"": ""<exact snippet or close paraphrase from the user's message>"",
+                                      ""should_save"": true,
+                                      ""confidence"": 0.83
+                                    }
+                                  ]
                                 }
 
-                                If nothing is worth saving, respond with:
-                                { ""memories"": [] }
+                                Rules:
+                                - Include one object per distinct memory-worthy fact.
+                                - Set ""should_save"" to true only when the item should be stored. If nothing qualifies, respond with { ""memories"": [] }.
+                                - Provide ""confidence"" as a number between 0 and 1 (use 0.5 when unsure).
+                                - Do not add extra fields, commentary, or text outside of the JSON.
                                 ";
 
     public const string FinalResponse = @"

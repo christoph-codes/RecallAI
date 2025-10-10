@@ -11,6 +11,8 @@ namespace RecallAI.Api.Services;
 public class CompletionPipelineService : ICompletionPipelineService
 {
     private const int MemoryTitleMaxLength = 80;
+    private const double DuplicateSimilarityThreshold = 0.98d;
+    private const double MinimumConfidenceToPersist = 0.5d;
 
     private readonly IOpenAIService _openAIService;
     private readonly IHydeService _hydeService;
@@ -157,6 +159,7 @@ public class CompletionPipelineService : ICompletionPipelineService
             systemPrompt: OpenAISystemPrompts.FinalResponse,
             cancellationToken: cancellationToken))
         {
+            _logger.LogInformation("Streaming chunk for user {UserId}: {Chunk}", userId, chunk);
             yield return chunk;
         }
 
@@ -190,14 +193,36 @@ public class CompletionPipelineService : ICompletionPipelineService
             return;
         }
 
+        var seenContents = new HashSet<string>(StringComparer.Ordinal);
         var candidates = new List<MemoryCandidate>();
         for (var index = 0; index < evaluation.Memories.Count; index++)
         {
-            var candidate = BuildMemoryCandidate(evaluation.Memories[index], index);
-            if (candidate is not null)
+            var item = evaluation.Memories[index];
+            if (item is null)
             {
-                candidates.Add(candidate);
+                continue;
             }
+
+            if (item.ShouldSave != true)
+            {
+                _logger.LogDebug("Skipping memory candidate {Index} with should_save=false for user {UserId}", index, userId);
+                continue;
+            }
+
+            var candidate = BuildMemoryCandidate(item, index);
+            if (candidate is null)
+            {
+                _logger.LogDebug("Skipping invalid memory candidate {Index} for user {UserId}", index, userId);
+                continue;
+            }
+
+            if (!seenContents.Add(candidate.Content))
+            {
+                _logger.LogDebug("Skipping duplicate memory candidate {Index} for user {UserId}", candidate.Index, userId);
+                continue;
+            }
+
+            candidates.Add(candidate);
         }
 
         if (candidates.Count == 0)
@@ -236,6 +261,17 @@ public class CompletionPipelineService : ICompletionPipelineService
 
             try
             {
+                if (candidate.Confidence is double confidence && confidence < MinimumConfidenceToPersist)
+                {
+                    _logger.LogDebug("Skipping evaluated memory {Index} for user {UserId} due to low confidence {Confidence}", candidate.Index, userId, confidence);
+                    continue;
+                }
+
+                if (await IsDuplicateMemoryAsync(userId, candidate, embedding))
+                {
+                    continue;
+                }
+
                 var memory = new Memory
                 {
                     UserId = userId,
@@ -268,23 +304,24 @@ public class CompletionPipelineService : ICompletionPipelineService
         }
 
         var summary = item.Summary?.Trim();
-        var sourceText = item.SourceText?.Trim();
 
         if (string.IsNullOrWhiteSpace(summary))
         {
             return null;
         }
 
-        var content = BuildMemoryContent(summary!, sourceText);
-        var title = BuildMemoryTitle(summary!);
-        var metadata = BuildMemoryMetadata(sourceText);
+        var sourceText = item.SourceText?.Trim();
+        var content = BuildMemoryContent(summary, sourceText);
+        var title = BuildMemoryTitle(summary);
+        var metadata = BuildMemoryMetadata(sourceText, item.Confidence);
 
         return new MemoryCandidate(
             index,
             content,
             content,
             title,
-            metadata);
+            metadata,
+            item.Confidence);
     }
 
     private static string BuildMemoryContent(string summary, string? sourceText)
@@ -323,7 +360,7 @@ public class CompletionPipelineService : ICompletionPipelineService
         return normalizedSummary.Substring(0, MemoryTitleMaxLength).TrimEnd() + "...";
     }
 
-    private static Dictionary<string, object> BuildMemoryMetadata(string? sourceText)
+    private static Dictionary<string, object> BuildMemoryMetadata(string? sourceText, double? confidence)
     {
         var metadata = new Dictionary<string, object>
         {
@@ -336,7 +373,47 @@ public class CompletionPipelineService : ICompletionPipelineService
             metadata["source_text"] = sourceText.Trim();
         }
 
+        if (confidence is double value)
+        {
+            var clamped = Math.Clamp(value, 0d, 1d);
+            metadata["confidence"] = Math.Round(clamped, 3);
+        }
+
         return metadata;
+    }
+
+    private async Task<bool> IsDuplicateMemoryAsync(Guid userId, MemoryCandidate candidate, float[] embedding)
+    {
+        try
+        {
+            var matches = await _memoryRepository.SearchSimilarAsync(userId, embedding, limit: 1, threshold: DuplicateSimilarityThreshold);
+            if (matches.Count == 0)
+            {
+                return false;
+            }
+
+            var (existingMemory, similarity) = matches[0];
+            if (similarity >= DuplicateSimilarityThreshold)
+            {
+                _logger.LogDebug(
+                    "Skipping evaluated memory {Index} for user {UserId} because it matches existing memory {ExistingMemoryId} with similarity {Similarity}",
+                    candidate.Index,
+                    userId,
+                    existingMemory.Id,
+                    similarity);
+                return true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Duplicate evaluation check failed for memory {Index} for user {UserId}",
+                candidate.Index,
+                userId);
+        }
+
+        return false;
     }
 
     private sealed record MemoryCandidate(
@@ -344,5 +421,6 @@ public class CompletionPipelineService : ICompletionPipelineService
         string Content,
         string EmbeddingText,
         string? Title,
-        Dictionary<string, object> Metadata);
+        Dictionary<string, object> Metadata,
+        double? Confidence);
 }

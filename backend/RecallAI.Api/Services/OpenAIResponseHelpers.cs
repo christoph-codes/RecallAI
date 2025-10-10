@@ -111,6 +111,61 @@ internal static class OpenAIResponseHelpers
         return TryExtractLegacyDelta(element, out delta);
     }
 
+    public static string ExtractAnyText(JsonElement element)
+    {
+        var primary = ExtractTextContent(element);
+        if (!string.IsNullOrEmpty(primary))
+        {
+            return primary;
+        }
+
+        if (element.ValueKind == JsonValueKind.Object)
+        {
+            if (element.TryGetProperty("delta", out var deltaElement))
+            {
+                var deltaText = ExtractTextFragment(deltaElement);
+                if (!string.IsNullOrEmpty(deltaText))
+                {
+                    return deltaText;
+                }
+            }
+
+            var builder = new StringBuilder();
+            foreach (var property in element.EnumerateObject())
+            {
+                var fragment = ExtractAnyText(property.Value);
+                if (!string.IsNullOrEmpty(fragment))
+                {
+                    builder.Append(fragment);
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        if (element.ValueKind == JsonValueKind.Array)
+        {
+            var builder = new StringBuilder();
+            foreach (var item in element.EnumerateArray())
+            {
+                var fragment = ExtractAnyText(item);
+                if (!string.IsNullOrEmpty(fragment))
+                {
+                    builder.Append(fragment);
+                }
+            }
+
+            return builder.ToString();
+        }
+
+        if (element.ValueKind == JsonValueKind.String)
+        {
+            return element.GetString() ?? string.Empty;
+        }
+
+        return string.Empty;
+    }
+
     private static bool TryAppendOutputText(JsonElement root, StringBuilder builder)
     {
         if (!root.TryGetProperty("output_text", out var outputTextElement))
@@ -155,6 +210,10 @@ internal static class OpenAIResponseHelpers
                         AppendIfNotEmpty(builder, textElement.GetString());
                     }
                 }
+            }
+            else if (entry.TryGetProperty("text", out var entryTextElement) && entryTextElement.ValueKind == JsonValueKind.String)
+            {
+                AppendIfNotEmpty(builder, entryTextElement.GetString());
             }
         }
 

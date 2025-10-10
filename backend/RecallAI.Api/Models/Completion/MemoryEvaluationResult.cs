@@ -15,4 +15,10 @@ public class MemoryEvaluationItem
 
     [JsonPropertyName("source_text")]
     public string? SourceText { get; set; }
+
+    [JsonPropertyName("should_save")]
+    public bool? ShouldSave { get; set; }
+
+    [JsonPropertyName("confidence")]
+    public double? Confidence { get; set; }
 }

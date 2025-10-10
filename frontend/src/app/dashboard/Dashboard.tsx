@@ -3,12 +3,7 @@
 import Button from "@/components/button";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { useAuthGuard } from "@/hooks/useAuthGuard";
-import {
-  useCreateMemory,
-  useCompletion,
-  useMemoryList,
-  useDeleteMemory,
-} from "@/queries";
+import { useCompletion, useMemoryList, useDeleteMemory } from "@/queries";
 import { useUser } from "@/contexts/UserContext";
 import Link from "next/link";
 import {
@@ -25,7 +20,6 @@ type Response = {
   content: string;
   timestamp: Date;
   isStreaming?: boolean;
-  memoryCreated?: boolean;
 };
 
 const formatTime = (date: Date) =>
@@ -50,11 +44,6 @@ const Dashboard = () => {
   const [responses, setResponses] = useState<Response[]>([]);
   const [inputMessage, setInputMessage] = useState("");
   const responsesEndRef = useRef<HTMLDivElement>(null);
-
-  const {
-    createMemoryMutation: createMemory,
-    error: createMemoryError,
-  } = useCreateMemory();
 
   const {
     complete,
@@ -194,22 +183,9 @@ const Dashboard = () => {
       });
 
       try {
-        const created = await createMemory({ content: query });
-        setResponses((prev) =>
-          prev.map((response) =>
-            response.id === responseId
-              ? { ...response, memoryCreated: true }
-              : response
-          )
-        );
-        try {
-          await refetchMemories();
-        } catch (refreshErr) {
-          console.error("Failed to refresh memories:", refreshErr);
-        }
-        openMemoryPanel(created.id);
-      } catch (memoryError) {
-        console.log("Memory creation skipped or failed:", memoryError);
+        await refetchMemories();
+      } catch (refreshErr) {
+        console.error("Failed to refresh memories:", refreshErr);
       }
     } catch (err) {
       console.error("Completion failed:", err);
@@ -305,12 +281,6 @@ const Dashboard = () => {
               </div>
             )}
 
-            {createMemoryError && (
-              <div className="text-xs text-yellow-300 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
-                Failed to store memory: {createMemoryError.message}
-              </div>
-            )}
-
             <div className="grid gap-3 sm:grid-cols-2">
               {isMemoriesLoading && (
                 <div className="flex items-center gap-2 text-sm text-gray-400">
@@ -387,11 +357,6 @@ const Dashboard = () => {
                       </p>
                       <div className="flex items-center gap-2 mt-0.5 text-xs text-gray-400">
                         <span>{formatTime(response.timestamp)}</span>
-                        {response.memoryCreated && (
-                          <span className="bg-green-500/20 text-green-300 px-1.5 py-0.5 rounded-full text-xs">
-                            Saved as memory
-                          </span>
-                        )}
                       </div>
                     </div>
                   </div>

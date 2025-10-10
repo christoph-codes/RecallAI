@@ -1,7 +1,8 @@
-﻿using System.Net;
+using System.Net;
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
+using System.Net.Http.Headers;
 using Microsoft.Extensions.Options;
 using RecallAI.Api.Interfaces;
 using RecallAI.Api.Models.Configuration;
@@ -47,9 +48,9 @@ public class OpenAIService : IOpenAIService
     {
         var model = _openAIConfig.Models.MemoryEvaluation;
 
-        var userPrompt = $"User Input:\n{memoryContent}\n\nEvaluation Criteria:\n{evaluationCriteria}\n\nDecide if this input should be stored as a memory and explain your reasoning.";
+        var userPrompt = $"User Input:\n{memoryContent}\n\nEvaluation Criteria:\n{evaluationCriteria}\n\nIdentify any durable memories that meet the criteria and respond only with the required JSON.";
 
-        return await GenerateResponseAsync(model, OpenAISystemPrompts.MemoryEvaluation, userPrompt, "memory evaluation");
+        return await GenerateResponseAsync(model, OpenAISystemPrompts.MemoryEvaluation, userPrompt, "memory evaluation", temperatureOverride: 0d);
     }
 
     public async Task<string> GenerateHyDEAsync(string query)
@@ -70,7 +71,7 @@ public class OpenAIService : IOpenAIService
         return await GenerateResponseAsync(model, OpenAISystemPrompts.FinalResponse, userPrompt, "final result generation");
     }
 
-    private async Task<string> GenerateResponseAsync(string model, string systemPrompt, string userPrompt, string operationType)
+    private async Task<string> GenerateResponseAsync(string model, string systemPrompt, string userPrompt, string operationType, double? temperatureOverride = null)
     {
         ArgumentNullException.ThrowIfNull(systemPrompt);
         ArgumentNullException.ThrowIfNull(userPrompt);
@@ -98,7 +99,7 @@ public class OpenAIService : IOpenAIService
             // Only include temperature for models that support it
             if (SupportsTemperature(model))
             {
-                requestPayload["temperature"] = 0.7;
+                requestPayload["temperature"] = temperatureOverride ?? 0.7;
             }
 
             var json = JsonSerializer.Serialize(requestPayload, OpenAIResponseHelpers.RequestSerializerOptions);
@@ -181,6 +182,8 @@ public class OpenAIService : IOpenAIService
         {
             Content = content
         };
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("text/event-stream"));
 
         var stopwatch = Stopwatch.StartNew();
         var responseBuffer = new StringBuilder();
@@ -207,7 +210,54 @@ public class OpenAIService : IOpenAIService
 
             _logger.LogError("OpenAI API request failed with status {StatusCode}: {ErrorContent}", response.StatusCode, errorContent);
             response.Dispose();
-            yield return $"\n\n❌ **{userFriendlyMessage}**";
+            yield return $"\n\n? **{userFriendlyMessage}**";
+            yield break;
+        }
+
+        var mediaType = response.Content.Headers.ContentType?.MediaType;
+        if (!string.Equals(mediaType, "text/event-stream", StringComparison.OrdinalIgnoreCase))
+        {
+            using (response)
+            {
+                var responseJson = await response.Content.ReadAsStringAsync();
+
+                if (!string.IsNullOrWhiteSpace(responseJson))
+                {
+                    string? extractedText = null;
+                    try
+                    {
+                        var jsonData = JsonSerializer.Deserialize<JsonElement>(responseJson);
+                        extractedText = OpenAIResponseHelpers.ExtractTextContent(jsonData);
+
+                        if (string.IsNullOrWhiteSpace(extractedText))
+                        {
+                            extractedText = OpenAIResponseHelpers.ExtractAnyText(jsonData);
+                        }
+                    }
+                    catch (JsonException ex)
+                    {
+                        _logger.LogWarning(ex, "Failed to parse non-streaming response payload. Raw payload: {PayloadPreview}", TruncateForLog(responseJson));
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(extractedText))
+                    {
+                        responseBuffer.Append(extractedText);
+                        yield return extractedText;
+                    }
+                    else
+                    {
+                        _logger.LogWarning("Received non-streaming response without text content. Raw payload: {PayloadPreview}", TruncateForLog(responseJson));
+                    }
+                }
+            }
+
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "Completed streaming completion using model {Model} in {ElapsedMilliseconds} ms. TotalChars={TotalChars}. ResponsePreview={ResponsePreview}",
+                selectedModel,
+                stopwatch.Elapsed.TotalMilliseconds,
+                responseBuffer.Length,
+                TruncateForLog(responseBuffer.ToString()));
             yield break;
         }
 
@@ -254,11 +304,60 @@ public class OpenAIService : IOpenAIService
                     {
                         var errorText = GetUserFriendlyErrorMessage(response.StatusCode, jsonData.ToString());
                         _logger.LogError("Received error from streaming response: {Error}", errorText);
+                        if (!string.IsNullOrEmpty(errorText))
+                        {
+                            responseBuffer.Append(errorText);
+                            yield return errorText;
+                        }
                         continue;
                     }
 
                     if (string.Equals(typeValue, "response.completed", StringComparison.OrdinalIgnoreCase))
                     {
+                        _logger.LogDebug("Received response.completed event: {Payload}", jsonData);
+
+                        var finalText = string.Empty;
+
+                        if (jsonData.TryGetProperty("response", out var responseElement))
+                        {
+                            finalText = OpenAIResponseHelpers.ExtractAnyText(responseElement);
+                        }
+
+                        if (string.IsNullOrEmpty(finalText))
+                        {
+                            finalText = OpenAIResponseHelpers.ExtractAnyText(jsonData);
+                        }
+
+                        if (!string.IsNullOrEmpty(finalText))
+                        {
+                            _logger.LogDebug("Extracted final streaming text length {Length}", finalText.Length);
+                            var existing = responseBuffer.ToString();
+                            string additional;
+
+                            if (existing.Length == 0)
+                            {
+                                additional = finalText;
+                            }
+                            else if (string.Equals(finalText, existing, StringComparison.Ordinal))
+                            {
+                                additional = string.Empty;
+                            }
+                            else if (finalText.StartsWith(existing, StringComparison.Ordinal))
+                            {
+                                additional = finalText[existing.Length..];
+                            }
+                            else
+                            {
+                                additional = finalText;
+                            }
+
+                            if (!string.IsNullOrEmpty(additional))
+                            {
+                                responseBuffer.Append(additional);
+                                yield return additional;
+                            }
+                        }
+
                         break;
                     }
                 }
@@ -360,3 +459,4 @@ private string GetUserFriendlyErrorMessage(HttpStatusCode statusCode, string err
         };
     }
 }
+
