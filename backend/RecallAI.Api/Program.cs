@@ -381,7 +381,7 @@ static string? TryGetSafeConnectionInfo(MemoryDbContext context)
             builder.Username = "*****";
         }
 
-        return $"Host={builder.Host};Port={builder.Port};Database={builder.Database};SslMode={builder.SslMode};TrustServerCertificate={builder.TrustServerCertificate}";
+        return $"Host={builder.Host};Port={builder.Port};Database={builder.Database};SslMode={builder.SslMode}";
     }
     catch
     {
